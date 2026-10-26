@@ -29,7 +29,8 @@
 .cell-count button.on { background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn); }
 .pen-off { flex: none; text-align: center; font-weight: 800; font-size: 1.3rem; padding: .4em; background: var(--warn-bg); color: var(--warn-ink); }
 .pen-locked .cell-tools, .pen-locked .cell-count { opacity: .45; pointer-events: none; }
-.my-ink { width: min(100%, 520px); height: 22dvh; display: block; }
+.my-ink { width: 100%; flex: 1; min-height: 30dvh; display: block; margin-top: .3em; }
+.mine-draw { flex: 1; display: flex; flex-direction: column; }
 .s-text { flex: 1; width: 100%; resize: none; font-size: 1.6rem; line-height: 1.6; border-radius: var(--radius); }
 .s-options { flex: 1; overflow: auto; display: flex; }
 .s-options .options { flex: 1; align-content: stretch; }
@@ -47,7 +48,7 @@
 .s-reveal { flex: 1; overflow: auto; padding: .8em 1em; display: flex; flex-direction: column; gap: .8em; }
 .reveal-q { flex: 1; display: flex; flex-direction: column; gap: .3em; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: .8em 1em; }
 .reveal-label { font-weight: 700; color: var(--muted); margin-top: .4em; }
-.revealed .answer-big { flex: 1; display: grid; place-items: center; font-size: clamp(4rem, 22dvh, 14rem); }
+.revealed .answer-big { display: grid; place-items: center; font-size: clamp(3rem, 11dvh, 8rem); }
 .mine { font-size: 1.3rem; }
 .my-img { max-height: 18dvh; max-width: 100%; vertical-align: top; border-radius: 8px; border: 1px solid var(--line); }
 

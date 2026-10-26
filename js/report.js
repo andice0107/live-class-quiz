@@ -1,7 +1,7 @@
 // 成績畫面與試算表匯出
 import { TYPES, answerText, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, esc, textHtml, showModal } from './util.js';
-import { paintInkThumb, useGrid } from './ink.js';
+import { paintInkThumb, useGrid, guideChars, ensureKai } from './ink.js';
 
 export function computeScores(S, r) {
   const out = {};
@@ -137,7 +137,10 @@ function showQuestion(S, r, k) {
     <p>答對率 <b>${st.rate ?? '-'}%</b>（${st.right}/${st.n}）　平均作答 <b>${st.avgSec ?? '-'}</b> 秒　空白 <b>${st.blank}</b> 人</p>
     ${Q.q.explanation ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(Q.q.explanation)}</div>` : ''}
     <div class="ans-grid">${answers}</div>`);
-  for (const cv of modal.querySelectorAll('canvas.ans-ink')) paintInkThumb(cv, (S.ink[k] || {})[cv.dataset.sid], { grid: useGrid(Q.q) });
+  const guides = guideChars(Q.q.type, answerText(Q.q));
+  const paint = () => { for (const cv of modal.querySelectorAll('canvas.ans-ink')) paintInkThumb(cv, (S.ink[k] || {})[cv.dataset.sid], { grid: useGrid(Q.q), guides: guides.length ? guides : null }); };
+  paint();
+  if (guides.length) ensureKai(guides).then(paint);
 }
 
 function exportXlsx(S, r) {

@@ -2,7 +2,7 @@ import { openDb } from './db.js';
 import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
 import { renderSummary, computeScores } from './report.js';
-import { buildCells, defaultCells, useGrid, paintInkThumb, cellData } from './ink.js';
+import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { THEMES, applyTheme, savedTheme, saveTheme } from './theme.js';
 
 const USED_KEY = 'lcq-used';
@@ -20,6 +20,7 @@ const S = {
   answers: {},          // qkey -> sid -> {v, submitted, at}
   ink: {},              // qkey -> sid -> {n, c:[{s,t,clearS}]}
   pen: { all: true, by: {} },  // 學生作答（畫筆）開關
+  guide: true,          // 公布答案後，田字格裡顯示半透明範字
   collab: null,         // 正在協助的學生手寫板
   theme: savedTheme(),
   unsub: [],
@@ -275,7 +276,10 @@ async function endStep() {
     reveal[k] = { a: answerText(Q.q), e: Q.q.explanation || '' };
     Q.participants = present;
   }
-  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, endsAt: null, endedAt: S.db.now() });
+  S.guide = true;
+  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, endsAt: null, endedAt: S.db.now() });
+  const guides = step.keys.flatMap(k => guideChars(S.round.questions[k].q.type, answerText(S.round.questions[k].q)));
+  if (guides.length) ensureKai(guides).then(() => { tileSigs = new WeakMap(); renderGrid(); });
   renderRun();
   // 等最後一刻按下送出的答案傳到，再自動批改
   S.grading = new Promise(res => setTimeout(() => {
@@ -408,7 +412,12 @@ function renderQPanel() {
       </div><div class="q-foot"><span>已送出 ${submittedCount(k)} / ${n}</span></div>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
-  else html += gradeBar(step);
+  else {
+    if (step.keys.some(k => guideChars(S.round.questions[k].q.type, answerText(S.round.questions[k].q)).length)) {
+      html += `<button id="guideBtn" class="peek">${S.guide ? '格內範字：顯示中（點一下隱藏）' : '格內範字：已隱藏（點一下顯示）'}</button>`;
+    }
+    html += gradeBar(step);
+  }
   p.innerHTML = html;
 }
 
@@ -530,14 +539,15 @@ function fillTile(el, sid, step) {
   }
   // 只在內容改變時更新，避免閃爍
   const ink = (S.ink[k] || {})[sid];
-  const sig = `${k}|${a ? a.at : ''}|${a ? a.submitted : ''}|${input === 'draw' ? JSON.stringify(ink || null) : ''}|${S.theme}`;
+  const guides = input === 'draw' && phase === 'revealed' && S.guide ? guideChars(Q.q.type, answerText(Q.q)) : [];
+  const sig = `${k}|${a ? a.at : ''}|${a ? a.submitted : ''}|${input === 'draw' ? JSON.stringify(ink || null) : ''}|${S.theme}|${guides.join('')}`;
   if (tileSigs.get(body) !== sig) {
     tileSigs.set(body, sig);
     if (input === 'draw') {
-      if (!ink || !ink.c) body.innerHTML = '<span class="muted">（空白）</span>';
+      if ((!ink || !ink.c) && !guides.length) body.innerHTML = '<span class="muted">（空白）</span>';
       else {
         if (!body.querySelector('canvas')) body.innerHTML = '<canvas class="tile-ink"></canvas>';
-        paintInkThumb(body.querySelector('canvas'), ink, { grid: useGrid(Q.q) });
+        paintInkThumb(body.querySelector('canvas'), ink || { n: guides.length, c: [] }, { grid: useGrid(Q.q), guides: guides.length ? guides : null });
       }
     } else if (!a || a.v === undefined || a.v === null || a.v === '') body.innerHTML = '<span class="muted">（空白）</span>';
     else if (input === 'choice') body.innerHTML = `<div class="tile-choice">${letter(a.v)}${a.submitted ? '' : '<span class="small muted">（未確認）</span>'}</div>`;
@@ -747,6 +757,12 @@ function bind() {
   });
   $('#qPanel').addEventListener('click', e => {
     if (e.target.id === 'peekBtn') { S.showAnswer = !S.showAnswer; renderQPanel(); return; }
+    if (e.target.id === 'guideBtn') {
+      S.guide = !S.guide;
+      S.db.update(`rooms/${S.room}/current`, { guide: S.guide });
+      renderQPanel(); renderGrid();
+      return;
+    }
     if (e.target.id === 'allRight') {
       for (const k of gradeKeys(current())) {
         const Q = S.round.questions[k];

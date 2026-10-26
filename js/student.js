@@ -1,7 +1,7 @@
 import { openDb } from './db.js';
 import { TYPES, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, esc, textHtml, sha256, fmtTime, throttle, ID_PATTERN, stripNonAlnum, enableImageZoom } from './util.js';
-import { buildCells, defaultCells, useGrid, paintInkThumb, cellData } from './ink.js';
+import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { applyTheme } from './theme.js';
 
 const app = $('#app');
@@ -91,7 +91,7 @@ const locked = () => timeUp() || !penAllowed();
 function render(force = false) {
   const c = S.cur;
   const phase = c?.phase || 'waiting';
-  const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}`;
+  const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}|${phase === 'revealed' ? c.guide !== false : ''}`;
   if (!force && sig === S.viewSig) { tick(); return; }
   S.viewSig = sig;
   if (S.inkUnsub) { S.inkUnsub(); S.inkUnsub = null; }
@@ -311,8 +311,9 @@ function myAnswerHtml(q, key) {
   const d = S.drafts[key];
   const input = TYPES[q.type].input;
   if (input === 'draw') {
-    if (!d || !d.cells.some(c => c.s.length || c.t.length)) return '<span class="muted">（沒有作答）</span>';
-    return `<canvas class="my-ink" data-key="${esc(key)}"></canvas>`;
+    const blank = !d || !d.cells.some(c => c.s.length || c.t.length);
+    if (blank && !guideChars(q.type, revealOf(key).a).length) return '<span class="muted">（沒有作答）</span>';
+    return `${blank ? '<span class="muted">（沒有作答）</span>' : ''}<canvas class="my-ink" data-key="${esc(key)}" data-type="${q.type}"></canvas>`;
   }
   if (!d || d.v === null || d.v === '' || d.v === undefined) return '<span class="muted">（沒有作答）</span>';
   if (input === 'choice') return `<b>${letter(d.v)}</b>${d.submitted ? '' : '（沒有按確認）'}`;
@@ -329,7 +330,7 @@ function revealBlock(q, key, label) {
     <div class="reveal-label">正確答案</div>
     <div class="${input === 'draw' && [...a].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(a)}</div>
     ${e ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(e)}</div>` : ''}
-    <div class="mine"><span class="muted">你的答案：</span>${myAnswerHtml(q, key)}</div></div>`;
+    <div class="mine ${input === 'draw' ? 'mine-draw' : ''}"><span class="muted">你的答案：</span>${myAnswerHtml(q, key)}</div></div>`;
 }
 
 function renderReveal() {
@@ -345,10 +346,16 @@ function renderReveal() {
   const subs = q.type === 'group' ? q.subs : [q];
   const blocks = app.querySelectorAll('.reveal-q');
   subs.forEach((sq, j) => { if (sq.type === 'choice') markChoice(blocks[j], ks[j]); });
-  for (const cv of app.querySelectorAll('canvas.my-ink')) {
-    const d = S.drafts[cv.dataset.key];
-    paintInkThumb(cv, { n: d.n, c: d.cells }, { grid: true });
-  }
+  const paintMine = () => {
+    for (const cv of app.querySelectorAll('canvas.my-ink')) {
+      const d = S.drafts[cv.dataset.key];
+      const guides = S.cur.guide !== false ? guideChars(cv.dataset.type, revealOf(cv.dataset.key).a) : null;
+      paintInkThumb(cv, d ? { n: d.n, c: d.cells } : { n: guides.length, c: [] }, { grid: cv.dataset.type !== 'write', guides });
+    }
+  };
+  paintMine();
+  const all = ks.flatMap((k, j) => guideChars((q.type === 'group' ? q.subs[j] : q).type, revealOf(k).a));
+  if (all.length) ensureKai(all).then(paintMine);
 }
 
 function markChoice(root, key) {

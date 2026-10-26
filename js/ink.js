@@ -8,7 +8,7 @@ const ERASE_R = 0.045;
 export function themeColors() {
   const cs = getComputedStyle(document.documentElement);
   const v = n => cs.getPropertyValue(n).trim();
-  return { ink: v('--ink') || '#f3efe4', bg: v('--pad-bg') || '#1f242b', grid: v('--pad-grid') || 'rgba(255,255,255,.25)' };
+  return { ink: v('--ink') || '#f3efe4', bg: v('--pad-bg') || '#1f242b', grid: v('--pad-grid') || 'rgba(255,255,255,.25)', guide: v('--pad-guide') || 'rgba(140,194,138,.35)' };
 }
 
 const q3 = n => Math.round(n * 1000) / 1000;
@@ -28,7 +28,65 @@ export function defaultCells(q) {
 }
 export const useGrid = q => q.type !== 'write';
 
-export function paintCell(ctx, size, { s, t, grid, colors, bg = true }) {
+// 公布答案時，田字格裡要疊上的半透明範字（每格一個）
+const HAN = /[\u3400-\u9fff\uf900-\ufaff]/g;
+export function guideChars(type, answer) {
+  const a = String(answer ?? '');
+  if (type === 'hanzi') return a.split(/[|｜、,，]/)[0].match(HAN) || [];
+  if (type === 'correction') return a.split(/→|->|改成|＞|>/).pop().match(HAN) || [];
+  if (type === 'zhuyin') return a.trim().split(/\s+/).filter(Boolean);
+  return [];
+}
+
+const KAI = '"TW-Kai", "BiauKai", "DFKai-SB", "標楷體", "Kaiti TC", serif';
+// 等楷體字型的切片下載好再畫，避免先畫成別的字型
+export function ensureKai(chars) {
+  const text = [].concat(chars || []).join('');
+  if (!text || !document.fonts) return Promise.resolve();
+  return document.fonts.load(`100px "TW-Kai"`, text).catch(() => {});
+}
+
+const TONES = 'ˊˇˋ';
+function drawGuide(ctx, size, g, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  const center = (ch, cx, cy, px) => {
+    ctx.font = `${px}px ${KAI}`;
+    const m = ctx.measureText(ch);
+    const h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+    const w = m.actualBoundingBoxLeft + m.actualBoundingBoxRight;
+    const x = cx - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2;
+    const y = cy + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+    ctx.fillText(ch, x, y);
+    return { w, h };
+  };
+  if (/[\u3105-\u312f]/.test(g)) {
+    // 注音：符號由上往下排，聲調寫在右邊，輕聲寫在上面
+    const chars = [...g];
+    const light = chars[0] === '˙' ? chars.shift() : (chars[chars.length - 1] === '˙' ? chars.pop() : null);
+    const tone = TONES.includes(chars[chars.length - 1]) ? chars.pop() : null;
+    const n = Math.max(1, chars.length);
+    const step = size * 0.86 / n;
+    const px = Math.min(size * 0.5, step * 1.05);
+    const top = (size - step * n) / 2;
+    chars.forEach((ch, i) => center(ch, size * 0.47, top + step * (i + 0.5), px));
+    if (tone) center(tone, size * 0.8, top + step * (n - 0.5) - step * 0.25, px * 0.8);
+    if (light) center(light, size * 0.47, top - step * 0.05, px * 0.8);
+  } else {
+    // 國字：放大到幾乎布滿整個田字格
+    ctx.font = `${size}px ${KAI}`;
+    const m = ctx.measureText(g);
+    const h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent || size;
+    const w = m.actualBoundingBoxLeft + m.actualBoundingBoxRight || size;
+    const scale = (size * 0.9) / Math.max(h, w);
+    center(g, size / 2, size / 2, size * scale);
+  }
+  ctx.restore();
+}
+
+export function paintCell(ctx, size, { s, t, grid, colors, bg = true, guide = null }) {
   ctx.clearRect(0, 0, size, size);
   if (bg) { ctx.fillStyle = colors.bg; ctx.fillRect(0, 0, size, size); }
   if (grid) {
@@ -42,6 +100,7 @@ export function paintCell(ctx, size, { s, t, grid, colors, bg = true }) {
     ctx.stroke();
     ctx.restore();
   }
+  if (guide) drawGuide(ctx, size, guide, colors.guide || 'rgba(140,194,138,.35)');
   const lw = Math.max(1.5, size * 0.03);
   drawStrokes(ctx, size, s || [], colors.ink, lw);
   drawStrokes(ctx, size, t || [], TEACHER_INK, lw);
@@ -78,9 +137,9 @@ export const cellData = c => ({ s: arr(c && c.s).map(arr), t: arr(c && c.t).map(
 export const hasInk = ink => !!ink && arr(ink.c).some(c => cellData(c).s.length);
 
 // 把一位學生的所有格子畫成一張縮圖
-export function paintInkThumb(canvas, ink, { grid = true } = {}) {
+export function paintInkThumb(canvas, ink, { grid = true, guides = null } = {}) {
   const cells = arr(ink && ink.c);
-  const n = Math.max(1, (ink && ink.n) || cells.length || 1);
+  const n = Math.max(1, (ink && ink.n) || cells.length || (guides && guides.length) || 1);
   const r = canvas.getBoundingClientRect();
   const W = Math.max(10, r.width), H = Math.max(10, r.height);
   const gap = 4;
@@ -107,7 +166,7 @@ export function paintInkThumb(canvas, ink, { grid = true } = {}) {
     const y = oy + Math.floor(i / best.cols) * (best.size + gap);
     ctx.save();
     ctx.translate(x, y);
-    paintCell(ctx, best.size, { ...cellData(cells[i]), grid, colors });
+    paintCell(ctx, best.size, { ...cellData(cells[i]), grid, colors, guide: guides ? guides[i] : null });
     ctx.restore();
   }
 }
