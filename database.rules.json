@@ -1,0 +1,13 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".read": "$room.length >= 16",
+        ".write": "$room.length >= 16",
+        "students": { "$sid": { ".validate": "$sid.matches(/^[A-Za-z0-9]{1,12}$/)" } }
+      }
+    }
+  }
+}

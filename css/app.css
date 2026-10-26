@@ -1,0 +1,88 @@
+/* 深色低亮度主題：文字清楚、不刺眼 */
+:root {
+  --bg: #171b21;
+  --panel: #20262e;
+  --panel-2: #29303a;
+  --line: #3a434f;
+  --text: #ece8df;
+  --muted: #a9b0ba;
+  --accent: #7fb7a4;      /* 柔和青綠 */
+  --accent-ink: #10201b;
+  --warn: #d9b26a;        /* 柔和琥珀 */
+  --bad: #d98a7e;
+  --good: #8cc28a;
+  --ink: #f3efe4;
+  --radius: 14px;
+  font-size: 18px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+body {
+  font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: .45em .9em; cursor: pointer; font-weight: 600; touch-action: manipulation;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.warn { background: #4a3b22; border-color: var(--warn); color: #f3dcaa; }
+button.danger { background: #4a2a26; border-color: var(--bad); color: #f5c9c1; }
+button.big { font-size: 1.3rem; padding: .6em 1.4em; }
+input[type=text], input[type=number], textarea, select {
+  background: #12161b; border: 1px solid var(--line); border-radius: 10px; padding: .45em .7em;
+}
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.badge {
+  display: inline-block; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: .1em .7em; font-size: .9rem; color: var(--muted); font-weight: 600;
+}
+.mode-note {
+  background: #3a3320; border: 1px solid var(--warn); color: #f3dcaa; border-radius: 10px; padding: .5em .8em;
+}
+
+/* 題目 */
+.q-prompt { font-size: 1.6rem; font-weight: 600; margin: .3em 0; overflow-wrap: anywhere; }
+.q-images { display: flex; flex-wrap: wrap; gap: .5em; margin: .4em 0; }
+.q-img { max-width: 100%; max-height: 32vh; border-radius: 8px; background: #fff; cursor: zoom-in; }
+.passage-title { font-weight: 700; font-size: 1.3rem; }
+.passage { font-size: 1.3rem; white-space: normal; }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(14em, 1fr)); gap: .6em; margin-top: .5em; }
+.option {
+  display: flex; gap: .6em; align-items: center; text-align: left; font-size: 1.4rem;
+  background: var(--panel-2); border: 2px solid var(--line); border-radius: var(--radius); padding: .6em .8em; min-height: 3.2em;
+}
+.option .opt-letter {
+  flex: none; width: 1.8em; height: 1.8em; border-radius: 50%; display: grid; place-items: center;
+  background: #12161b; font-weight: 700;
+}
+.option .opt-body img { display: block; max-height: 18vh; margin-bottom: .2em; }
+.option.selected { border-color: var(--warn); background: #3a3320; }
+.option.correct { border-color: var(--good); background: #22382a; }
+.answer-big {
+  font-size: clamp(3rem, 14vh, 10rem); font-weight: 700; line-height: 1.15; color: var(--good);
+  text-align: center; overflow-wrap: anywhere;
+}
+.answer-mid { font-size: clamp(1.6rem, 5vh, 3rem); font-weight: 700; color: var(--good); overflow-wrap: anywhere; }
+
+/* 視窗 */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: grid; place-items: center; z-index: 50; padding: 3vh 3vw; }
+.modal-box { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); max-width: min(1000px, 94vw); max-height: 94vh; overflow: auto; padding: 1.2em 1.4em; }
+.modal-close { position: absolute; top: .5em; right: .5em; }
+.zoom-img { max-width: 90vw; max-height: 85vh; background: #fff; border-radius: 8px; display: block; }
+
+/* 首頁 */
+.home { min-height: 100%; display: grid; place-items: center; padding: 16px; }
+.home-box { width: min(560px, 100%); display: grid; gap: 1em; text-align: center; }
+.home-box h1 { font-size: 2rem; margin: 0; }
+.home-box a.button {
+  display: block; text-decoration: none; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1.1em; font-size: 1.4rem; font-weight: 700;
+}
+.home-box a.button:hover { border-color: var(--accent); }

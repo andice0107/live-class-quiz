@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>師生同步出題｜老師端</title>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/teacher.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="teacher">
+
+<!-- 設定畫面 -->
+<div id="setup" class="setup">
+  <div class="setup-inner">
+    <h1>師生同步出題</h1>
+    <p id="modeNote" class="mode-note hidden"></p>
+
+    <section class="card">
+      <h2>1. 載入題庫</h2>
+      <div class="row">
+        <label class="file-btn"><input id="bankFile" type="file" accept=".json,application/json" multiple hidden>選擇題庫檔</label>
+        <button id="sampleBtn">載入範例題庫</button>
+        <button id="previewBtn" disabled>預覽全部題目</button>
+      </div>
+      <div id="bankInfo" class="muted">尚未載入題庫。</div>
+      <div id="bankErrors" class="errors hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>2. 出題設定</h2>
+      <table class="settings">
+        <thead><tr><th>題型</th><th>題庫裡有</th><th>還沒出過</th><th>這次出幾題</th><th>作答時間（秒）</th><th>無限時</th></tr></thead>
+        <tbody id="typeRows"><tr><td colspan="6" class="muted">載入題庫後會出現。</td></tr></tbody>
+      </table>
+      <p class="muted small">題組算一題抽出，抽中後整組一起考，組內小題照原本順序；計分時每個小題各算一題。</p>
+      <div class="radio-group">
+        <label><input type="radio" name="repeat" value="norepeat" checked> 出過的題目先不再出，等全部題目都出過才重新開始</label>
+        <label><input type="radio" name="repeat" value="repeat"> 每次重新抽，允許和之前出過的重複</label>
+      </div>
+      <p class="muted small">「出過的題目」只記到關閉這個工具為止，下次打開就重新算。</p>
+    </section>
+
+    <div class="row end">
+      <span id="drawInfo" class="muted"></span>
+      <button id="startBtn" class="primary big" disabled>建立教室並抽題</button>
+    </div>
+  </div>
+</div>
+
+<!-- 上課畫面 -->
+<div id="run" class="run hidden">
+  <header class="topbar">
+    <button id="joinToggle">加入資訊 ▾</button>
+    <span id="studentCount" class="badge">學生 0 人</span>
+    <span id="progress" class="badge">尚未開始</span>
+    <div id="timer" class="timer">--:--</div>
+    <div id="extendBox" class="extend">
+      <span class="muted">延長時間</span>
+      <button data-add="10">+10秒</button><button data-add="20">+20秒</button><button data-add="30">+30秒</button>
+    </div>
+    <button id="endBtn" class="warn">直接結束作答</button>
+    <button id="nextBtn" class="primary">開始第一題</button>
+    <span class="spacer"></span>
+    <button id="showAll">全開</button>
+    <button id="maskAll">全遮</button>
+    <button id="earlyEnd" class="danger">提早結束</button>
+  </header>
+  <div id="joinPanel" class="join-panel hidden"></div>
+  <main class="stage">
+    <section id="qPanel" class="q-panel"></section>
+    <section id="grid" class="grid"></section>
+  </main>
+</div>
+
+<!-- 成績畫面 -->
+<div id="summary" class="summary hidden"></div>
+
+<script type="module" src="js/teacher.js"></script>
+</body>
+</html>

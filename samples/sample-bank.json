@@ -1,0 +1,108 @@
+{
+ "title": "範例題庫",
+ "subject": "國語／數學",
+ "items": [
+  {
+   "id": "h1",
+   "type": "寫國字",
+   "prompt": "看注音寫國字：ㄒㄩㄝˊ　ㄒㄧㄠˋ（上＿＿）",
+   "answer": "學校"
+  },
+  {
+   "id": "h2",
+   "type": "寫國字",
+   "prompt": "看注音寫國字：ㄆㄥˊ　ㄧㄡˇ",
+   "answer": "朋友"
+  },
+  {
+   "id": "z1",
+   "type": "寫注音",
+   "prompt": "寫出注音：「花」",
+   "answer": "ㄏㄨㄚ"
+  },
+  {
+   "id": "c1",
+   "type": "改錯字",
+   "prompt": "找出錯字並改正：我門一起去公園玩。",
+   "answer": "門→們"
+  },
+  {
+   "id": "m1",
+   "type": "選擇題",
+   "prompt": "下面哪一個詞語是「高興」的意思？",
+   "options": [
+    "難過",
+    "快樂",
+    "生氣",
+    "害怕"
+   ],
+   "answer": "B"
+  },
+  {
+   "id": "m2",
+   "type": "選擇題",
+   "prompt": "圖中有幾顆橘子？",
+   "images": [
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdodD0iMjAwIiB2aWV3Qm94PSIwIDAgMzIwIDIwMCI+PHJlY3Qgd2lkdGg9IjMyMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiNmZmYiLz48ZyBmaWxsPSIjZThhMzNkIiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMyI+PGNpcmNsZSBjeD0iNzAiIGN5PSIxMDAiIHI9IjI4Ii8+PGNpcmNsZSBjeD0iMTYwIiBjeT0iMTAwIiByPSIyOCIvPjxjaXJjbGUgY3g9IjI1MCIgY3k9IjEwMCIgcj0iMjgiLz48L2c+PHRleHQgeD0iMTYwIiB5PSIxODAiIGZvbnQtc2l6ZT0iMjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzMzMiPuaVuOS4gOaVuOacieW5vumhhuapmOWtkDwvdGV4dD48L3N2Zz4="
+   ],
+   "options": [
+    "2 顆",
+    "3 顆",
+    "4 顆",
+    "5 顆"
+   ],
+   "answer": "B"
+  },
+  {
+   "id": "w1",
+   "type": "造詞",
+   "prompt": "用「天」造一個詞。",
+   "answer": "天空、今天、天氣（參考）"
+  },
+  {
+   "id": "s1",
+   "type": "照樣造句",
+   "prompt": "照樣造句：\n一邊……一邊……\n例：弟弟一邊吃飯，一邊看電視。",
+   "answer": "參考：媽媽一邊唱歌，一邊煮飯。"
+  },
+  {
+   "id": "f1",
+   "type": "填充",
+   "prompt": "3 + 5 = ？（請打數字）",
+   "answer": "8"
+  },
+  {
+   "id": "g1",
+   "type": "題組",
+   "title": "閱讀測驗：小狗回家",
+   "passage": "小明的小狗叫做小白。有一天，小白跑出家門，找不到回家的路。小明和爸爸找了一整個下午，最後在公園的溜滑梯下面找到牠。小明抱著小白說：「以後我會好好看著你。」",
+   "questions": [
+    {
+     "type": "選擇題",
+     "prompt": "小狗叫什麼名字？",
+     "options": [
+      "小黑",
+      "小白",
+      "小黃"
+     ],
+     "answer": "B"
+    },
+    {
+     "type": "選擇題",
+     "prompt": "他們在哪裡找到小狗？",
+     "options": [
+      "學校",
+      "市場",
+      "公園"
+     ],
+     "answer": "C"
+    },
+    {
+     "type": "造句",
+     "prompt": "如果你是小明，找到小白後你會說什麼？請寫一句話。",
+     "answer": "由老師判斷"
+    }
+   ]
+  }
+ ]
+}

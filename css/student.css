@@ -1,0 +1,52 @@
+/* 學生端：整個畫面填滿，作答區自動撐開 */
+.student { overflow: hidden; }
+.s-app { height: 100dvh; display: flex; flex-direction: column; }
+.s-app.center { display: grid; place-items: center; padding: 16px; }
+.join-form { width: min(480px, 100%); display: grid; gap: 1em; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.5em; }
+.join-form h1 { margin: 0; text-align: center; }
+.join-form label { display: grid; gap: .3em; font-weight: 700; font-size: 1.2rem; }
+.join-form input { font-size: 1.6rem; padding: .4em .6em; letter-spacing: .05em; }
+.join-form .err { color: var(--bad); min-height: 1.4em; font-weight: 700; }
+
+.s-top { flex: none; display: flex; align-items: center; gap: 1em; padding: .4em .9em; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 1.2rem; font-weight: 700; }
+.s-top .prog { flex: 1; color: var(--muted); }
+.s-timer { font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.s-timer.urgent { color: var(--bad); }
+.s-msg { flex: 1; display: grid; place-items: center; font-size: 2rem; font-weight: 700; text-align: center; padding: 16px; }
+
+.s-question { flex: none; max-height: 42dvh; overflow: auto; padding: .6em 1em; border-bottom: 1px solid var(--line); }
+.s-question .q-prompt { font-size: 1.9rem; }
+.s-question .q-img { max-height: 24dvh; }
+.input-choice .s-question { max-height: 55dvh; }
+.input-text .s-question { max-height: 38dvh; }
+.s-passage summary { cursor: pointer; color: var(--accent); font-weight: 700; }
+.s-passage .passage { font-size: 1.35rem; }
+
+.s-answer { flex: 1; min-height: 0; display: flex; padding: .6em; }
+.pad-wrap { flex: 1; min-height: 0; display: flex; }
+.pad { flex: 1; width: 100%; height: 100%; background: #1f242b; border: 2px solid var(--line); border-radius: var(--radius); }
+.pad.locked { opacity: .6; }
+.s-text { flex: 1; width: 100%; resize: none; font-size: 1.6rem; line-height: 1.6; border-radius: var(--radius); }
+.s-options { flex: 1; overflow: auto; display: flex; }
+.s-options .options { flex: 1; align-content: stretch; }
+.s-options .option { font-size: 1.7rem; }
+
+.s-actions { flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: .6em; padding: .5em .8em; background: var(--panel); border-top: 1px solid var(--line); }
+.s-actions .spacer { flex: 1; }
+.s-actions button { font-size: 1.2rem; padding: .5em 1em; }
+.sub-nav { display: flex; align-items: center; gap: .5em; font-weight: 700; }
+.send-state { color: var(--warn); font-weight: 700; text-align: right; }
+.s-actions button { white-space: nowrap; }
+@media (max-width: 700px) { .sub-nav span { display: none; } .s-actions { gap: .4em; } }
+.send-state.ok { color: var(--good); }
+
+.s-reveal { flex: 1; overflow: auto; padding: .8em 1em; display: flex; flex-direction: column; gap: .8em; }
+.reveal-q { flex: 1; display: flex; flex-direction: column; gap: .3em; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: .8em 1em; }
+.reveal-label { font-weight: 700; color: var(--muted); margin-top: .4em; }
+.revealed .answer-big { flex: 1; display: grid; place-items: center; font-size: clamp(4rem, 22dvh, 14rem); }
+.mine { font-size: 1.3rem; }
+.my-img { max-height: 18dvh; max-width: 100%; vertical-align: top; border-radius: 8px; border: 1px solid var(--line); }
+
+.s-final { flex: 1; display: grid; place-content: center; text-align: center; gap: .2em; font-size: 1.6rem; }
+.final-score { font-size: clamp(6rem, 30dvh, 16rem); font-weight: 800; color: var(--warn); line-height: 1; }
+.final-detail { font-size: 2rem; font-weight: 700; }
