@@ -519,7 +519,13 @@ function bind() {
   });
   $('#startBtn').addEventListener('click', async () => {
     const settings = readSettings();
-    if (!S.room) await createRoom();
+    if (!S.room) {
+      try { await createRoom(); } catch (err) {
+        S.room = null;
+        alert('無法連上即時同步資料庫，請確認 Firebase 的規則已經發布。\n（' + err.message + '）');
+        return;
+      }
+    }
     newRound(settings);
     phase = 'idle';
     S.masks = {};
