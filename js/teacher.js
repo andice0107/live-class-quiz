@@ -2,6 +2,8 @@ import { openDb } from './db.js';
 import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
 import { renderSummary, computeScores } from './report.js';
+import { buildCells, defaultCells, useGrid, paintInkThumb, cellData } from './ink.js';
+import { THEMES, applyTheme, savedTheme, saveTheme } from './theme.js';
 
 const USED_KEY = 'lcq-used';
 
@@ -16,6 +18,10 @@ const S = {
   students: {},         // sid -> {id, joinedAt, online}
   live: {},             // sid -> {qkey, sub, at}
   answers: {},          // qkey -> sid -> {v, submitted, at}
+  ink: {},              // qkey -> sid -> {n, c:[{s,t,clearS}]}
+  pen: { all: true, by: {} },  // 學生作答（畫筆）開關
+  collab: null,         // 正在協助的學生手寫板
+  theme: savedTheme(),
   unsub: [],
   rounds: [],
   round: null,
@@ -190,7 +196,7 @@ async function createRoom() {
   const base = location.href.replace(/[^/]*([?#].*)?$/, '');
   S.joinUrl = `${base}student.html?r=${S.room}`;
   const R = `rooms/${S.room}`;
-  await S.db.set(`${R}/meta`, { codeHash: await sha256(salt + S.code), salt, created: S.db.now() });
+  await S.db.set(`${R}/meta`, { codeHash: await sha256(salt + S.code), salt, created: S.db.now(), theme: S.theme });
   S.db.onDisconnectRemove(R);
   S.db.on(`${R}/students`, v => { S.students = v || {}; renderRun(); });
   S.db.on(`${R}/live`, v => { S.live = v || {}; renderGrid(); });
@@ -243,7 +249,13 @@ async function startStep(i) {
   sessionStorage.setItem(USED_KEY, JSON.stringify([...S.used]));
   // 只聽這一題的作答
   S.unsub.forEach(f => f && f());
-  S.unsub = step.keys.map(k => S.db.on(`rooms/${S.room}/answers/${k}`, v => { S.answers[k] = v || {}; renderGrid(); renderQPanel(); }));
+  S.unsub = step.keys.flatMap(k => [
+    S.db.on(`rooms/${S.room}/answers/${k}`, v => { S.answers[k] = v || {}; renderGrid(); renderQPanel(); }),
+    S.db.on(`rooms/${S.room}/ink/${k}`, v => { S.ink[k] = v || {}; renderGrid(); }),
+  ]);
+  // 每一題開始時，全班都可以作答
+  S.pen = { all: true, by: {} };
+  await S.db.set(`rooms/${S.room}/pen`, S.pen);
   await S.db.set(`rooms/${S.room}/current`, {
     no: i + 1, total: r.steps.length, round: r.no,
     keys: step.keys, q: publicItem(step.item), phase, startedAt: now, endsAt,
@@ -254,28 +266,39 @@ async function startStep(i) {
 async function endStep() {
   if (phase !== 'answering') return;
   phase = 'revealed';
+  closeCollab();
   const step = current();
   const present = Object.keys(S.students);
   const reveal = {};
   for (const k of step.keys) {
     const Q = S.round.questions[k];
-    reveal[k] = answerText(Q.q);
+    reveal[k] = { a: answerText(Q.q), e: Q.q.explanation || '' };
     Q.participants = present;
-    const ans = S.answers[k] || {};
-    for (const sid of present) {
-      if (Q.marks[sid] === undefined) {
-        const g = autoGrade(Q.q, ans[sid]);
-        if (g !== undefined) Q.marks[sid] = g;
-      }
-    }
   }
   await S.db.update(`rooms/${S.room}/current`, { phase, reveal, endsAt: null, endedAt: S.db.now() });
   renderRun();
+  // 等最後一刻按下送出的答案傳到，再自動批改
+  S.grading = new Promise(res => setTimeout(() => {
+    for (const k of step.keys) {
+      const Q = S.round.questions[k];
+      const ans = S.answers[k] || {};
+      for (const sid of Q.participants) {
+        if (Q.marks[sid] === undefined) {
+          const g = autoGrade(Q.q, ans[sid]);
+          if (g !== undefined) Q.marks[sid] = g;
+        }
+      }
+    }
+    renderRun();
+    res();
+  }, 1500));
+  await S.grading;
 }
 
 async function next() {
   const r = S.round;
   if (phase === 'answering') return;
+  await S.grading;
   if (r.idx + 1 < r.steps.length) await startStep(r.idx + 1);
   else await finishRound();
 }
@@ -323,6 +346,8 @@ function renderRun() {
   const r = S.round;
   $('#progress').textContent = r && r.idx >= 0 ? `第 ${r.idx + 1} / ${r.steps.length} 題` : `共 ${r ? r.steps.length : 0} 題，尚未開始`;
   $('#endBtn').classList.toggle('hidden', phase !== 'answering');
+  $('#penAllBtn').classList.toggle('hidden', phase !== 'answering');
+  renderPenAll();
   $('#extendBox').classList.toggle('hidden', !(phase === 'answering' && endsAt));
   const nb = $('#nextBtn');
   nb.classList.toggle('hidden', phase === 'answering');
@@ -369,7 +394,7 @@ function renderQPanel() {
       const q = r.questions[k].q;
       html += `<div class="sub-q ${S.subTab === j ? 'focus' : ''}">${questionHtml(q, { label: r.questions[k].label })}
         ${q.type === 'choice' ? optionsHtml(q, { correct: revealed || S.showAnswer ? q.answer : null }) : ''}
-        ${revealed || S.showAnswer ? `<div class="answer-mid">答案：${textHtml(answerText(q))}</div>` : ''}</div>`;
+        ${revealed || S.showAnswer ? `<div class="answer-mid">答案：${textHtml(answerText(q))}</div>${explainHtml(q)}` : ''}</div>`;
     });
     html += `</div><div class="sub-tabs">${tabs.join('')}</div>`;
   } else {
@@ -378,12 +403,17 @@ function renderQPanel() {
     const showAns = revealed || S.showAnswer;
     html += `<div class="q-scroll">${questionHtml(q, { label: `第 ${r.idx + 1} 題` })}
       ${q.type === 'choice' ? optionsHtml(q, { correct: showAns ? q.answer : null }) : ''}
-      ${showAns && q.type !== 'choice' ? `<div class="${TYPES[q.type].input === 'draw' ? 'answer-big' : 'answer-mid'}">${textHtml(answerText(q))}</div>` : ''}
+      ${showAns && q.type !== 'choice' ? `<div class="${TYPES[q.type].input === 'draw' && [...answerText(q)].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(answerText(q))}</div>` : ''}
+      ${showAns ? explainHtml(q) : ''}
       </div><div class="q-foot"><span>已送出 ${submittedCount(k)} / ${n}</span></div>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
   else html += gradeBar(step);
   p.innerHTML = html;
+}
+
+function explainHtml(q) {
+  return q.explanation ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(q.explanation)}</div>` : '';
 }
 
 function gradeBar(step) {
@@ -415,8 +445,15 @@ function layoutGrid(n) {
     if (size > best.size) best = { cols, size };
   }
   const rows = Math.ceil(n / best.cols);
+  const key = `${best.cols}x${rows}|${W}x${H}`;
   g.style.setProperty('--cols', best.cols);
   g.style.setProperty('--rows', rows);
+  // 版面改變後，手寫縮圖要依新大小重畫
+  if (g.dataset.layout !== key) {
+    g.dataset.layout = key;
+    tileSigs = new WeakMap();
+    requestAnimationFrame(() => renderGrid());
+  }
 }
 
 function tileKey(sid, step) {
@@ -446,7 +483,7 @@ function renderGrid() {
       el = document.createElement('div');
       el.className = 'tile';
       el.dataset.sid = sid;
-      el.innerHTML = `<div class="tile-head"><span class="sid"></span><span class="st"></span></div><div class="tile-body"></div><div class="tile-mark"></div><div class="mask">已遮蔽<br><span class="small">點一下顯示</span></div>`;
+      el.innerHTML = `<div class="tile-head"><span class="sid"></span><span class="st"></span><span class="tile-btns"></span></div><div class="tile-body"></div><div class="tile-mark"></div><div class="mask">已遮蔽<br><span class="small">點一下顯示</span></div>`;
       g.append(el);
     }
     g.append(el); // 維持加入順序
@@ -454,6 +491,9 @@ function renderGrid() {
   }
   layoutGrid(sids.length);
 }
+
+let tileSigs = new WeakMap();
+const penOn = sid => S.pen.by?.[sid] ?? S.pen.all ?? true;
 
 function fillTile(el, sid, step) {
   const st = S.students[sid];
@@ -467,7 +507,8 @@ function fillTile(el, sid, step) {
     $('.st', el).textContent = st.online === false ? '離線' : '已加入';
     body.innerHTML = '';
     markEl.innerHTML = '';
-    el.className = el.className.replace(/\b(right|wrong)\b/g, '').trim();
+    $('.tile-btns', el).innerHTML = '';
+    el.classList.remove('right', 'wrong', 'submitted', 'pen-off');
     return;
   }
   const k = tileKey(sid, step);
@@ -477,13 +518,29 @@ function fillTile(el, sid, step) {
   const subInfo = step.item.type === 'group' ? `第 ${Q.label.split('-')[1]} 小題・` : '';
   $('.st', el).textContent = st.online === false ? '離線' : subInfo + (a ? (a.submitted ? '已送出' : '作答中') : '未作答');
   el.classList.toggle('submitted', !!(a && a.submitted));
+  const allowed = penOn(sid);
+  el.classList.toggle('pen-off', !allowed);
+  const btnSig = `${phase}|${allowed}|${input}`;
+  const btns = $('.tile-btns', el);
+  if (btns.dataset.sig !== btnSig) {
+    btns.dataset.sig = btnSig;
+    btns.innerHTML = phase === 'answering'
+      ? `${input === 'draw' ? '<button data-collab title="進入這位學生的手寫板">✍ 協助</button>' : ''}<button data-pen title="開關這位學生的作答">${allowed ? '🔓 可作答' : '🔒 暫停'}</button>`
+      : '';
+  }
   // 只在內容改變時更新，避免閃爍
-  const sig = `${k}|${a ? a.at : ''}|${a ? a.submitted : ''}`;
-  if (body.dataset.sig !== sig) {
-    body.dataset.sig = sig;
-    if (!a || a.v === undefined || a.v === null || a.v === '') body.innerHTML = '<span class="muted">（空白）</span>';
-    else if (input === 'draw') body.innerHTML = `<img src="${a.v}" alt="">`;
-    else if (input === 'choice') body.innerHTML = `<div class="tile-choice">${letter(a.v)}</div>`;
+  const ink = (S.ink[k] || {})[sid];
+  const sig = `${k}|${a ? a.at : ''}|${a ? a.submitted : ''}|${input === 'draw' ? JSON.stringify(ink || null) : ''}|${S.theme}`;
+  if (tileSigs.get(body) !== sig) {
+    tileSigs.set(body, sig);
+    if (input === 'draw') {
+      if (!ink || !ink.c) body.innerHTML = '<span class="muted">（空白）</span>';
+      else {
+        if (!body.querySelector('canvas')) body.innerHTML = '<canvas class="tile-ink"></canvas>';
+        paintInkThumb(body.querySelector('canvas'), ink, { grid: useGrid(Q.q) });
+      }
+    } else if (!a || a.v === undefined || a.v === null || a.v === '') body.innerHTML = '<span class="muted">（空白）</span>';
+    else if (input === 'choice') body.innerHTML = `<div class="tile-choice">${letter(a.v)}${a.submitted ? '' : '<span class="small muted">（未確認）</span>'}</div>`;
     else body.innerHTML = `<div class="tile-text">${textHtml(a.v)}</div>`;
   }
   const mark = Q.marks[sid];
@@ -493,6 +550,105 @@ function fillTile(el, sid, step) {
     markEl.innerHTML = `<button data-mark="1" class="${mark === true ? 'on' : ''}">✓ 對</button><button data-mark="0" class="${mark === false ? 'on' : ''}">✗ 錯</button>`;
     markEl.dataset.key = k;
   } else markEl.innerHTML = '';
+}
+
+// ---------- 協助學生的手寫板 ----------
+
+function openCollab(sid) {
+  closeCollab();
+  const step = current();
+  if (!step) return;
+  const k = tileKey(sid, step);
+  const Q = S.round.questions[k];
+  const P = `rooms/${S.room}/ink/${k}/${sid}`;
+  const ov = document.createElement('div');
+  ov.className = 'collab';
+  ov.innerHTML = `<header class="collab-head">
+      <b class="collab-who">協助 ${esc(sid)}</b><span class="muted">第 ${esc(Q.label)} 題</span>
+      <span class="spacer"></span>
+      <button data-cpen></button>
+      <button data-wipe="s" class="danger">清除學生全部筆劃</button>
+      <button data-wipe="t">清除老師全部筆劃</button>
+      <button data-close class="primary">結束協助</button>
+    </header>
+    <div class="collab-q">${questionHtml(Q.q, { label: Q.label })}</div>
+    <div class="collab-cells"></div>
+    <p class="collab-note muted">紅色是老師的筆劃，學生不能擦掉。每格下面的工具只會動到老師自己的筆劃；「清學生」會清掉那一格學生寫的字。</p>`;
+  document.body.append(ov);
+  let n = 0, cells = [];
+  const pushers = {};
+  const push = (i, strokes) => {
+    const f = pushers[i] || (pushers[i] = throttleTail(st => S.db.set(`${P}/c/${i}/t`, st.length ? st : null), 200));
+    f(strokes);
+  };
+  const cellAt = (v, i) => v && v.c ? v.c[i] : null;
+  const build = (nn, v) => {
+    n = nn;
+    cells = buildCells($('.collab-cells', ov), n, {
+      own: 't', teacher: true, grid: useGrid(Q.q),
+      onChange: (i, kind) => {
+        if (kind === 'wipeS') { S.db.set(`${P}/c/${i}/clearS`, S.db.now()); return; }
+        push(i, cells[i].t);
+      },
+    });
+    cells.forEach((c, i) => { const cd = cellData(cellAt(v, i)); c.t = cd.t; c.s = cd.s; c.redraw(); });
+  };
+  const unsub = S.db.on(P, v => {
+    const nn = (v && v.n) || defaultCells(Q.q);
+    if (nn !== n) build(nn, v);
+    cells.forEach((c, i) => c.setOther(cellData(cellAt(v, i)).s));
+  });
+  const penBtn = $('[data-cpen]', ov);
+  const showPen = () => { penBtn.textContent = penOn(sid) ? '學生畫筆：開啟中（點一下關閉）' : '學生畫筆：關閉中（點一下開啟）'; penBtn.className = penOn(sid) ? '' : 'warn'; };
+  showPen();
+  ov.addEventListener('click', e => {
+    if (e.target.closest('[data-close]')) { closeCollab(); return; }
+    if (e.target.closest('[data-cpen]')) {
+      const on = !penOn(sid);
+      S.pen.by = { ...(S.pen.by || {}), [sid]: on };
+      S.db.set(`rooms/${S.room}/pen/by/${sid}`, on);
+      showPen();
+      renderGrid();
+      return;
+    }
+    const w = e.target.closest('[data-wipe]');
+    if (w) {
+      for (let i = 0; i < n; i++) {
+        if (w.dataset.wipe === 's') S.db.set(`${P}/c/${i}/clearS`, S.db.now());
+        else { cells[i].clear(); }
+      }
+    }
+  });
+  S.collab = { sid, close: () => { unsub(); ov.remove(); } };
+}
+
+function closeCollab() {
+  if (S.collab) { S.collab.close(); S.collab = null; }
+}
+
+// 節流，但最後一次一定會送出
+function throttleTail(fn, ms) {
+  let timer = null, last = null;
+  return arg => {
+    last = arg;
+    if (timer) return;
+    timer = setTimeout(() => { timer = null; fn(last); }, ms);
+  };
+}
+
+function setTheme(name) {
+  S.theme = applyTheme(name);
+  saveTheme(S.theme);
+  for (const sel of $$('.theme-select')) sel.value = S.theme;
+  if (S.room) S.db.update(`rooms/${S.room}/meta`, { theme: S.theme });
+  renderGrid();
+}
+
+function renderPenAll() {
+  const b = $('#penAllBtn');
+  if (!b) return;
+  b.textContent = S.pen.all ? '全班作答：開放中' : '全班作答：暫停中';
+  b.classList.toggle('warn', !S.pen.all);
 }
 
 // ---------- 事件 ----------
@@ -542,6 +698,17 @@ function bind() {
   });
   $('#joinPanel').addEventListener('click', () => $('#joinToggle').click());
   $('#nextBtn').addEventListener('click', next);
+  $('#penAllBtn').addEventListener('click', () => {
+    S.pen = { all: !S.pen.all, by: {} };
+    S.db.set(`rooms/${S.room}/pen`, S.pen);
+    renderPenAll();
+    renderGrid();
+  });
+  for (const sel of $$('.theme-select')) {
+    sel.innerHTML = Object.entries(THEMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+    sel.value = S.theme;
+    sel.addEventListener('change', () => setTheme(sel.value));
+  }
   $('#endBtn').addEventListener('click', endStep);
   $('#extendBox').addEventListener('click', async e => {
     const add = Number(e.target.dataset.add);
@@ -559,6 +726,14 @@ function bind() {
     const tile = e.target.closest('.tile');
     if (!tile) return;
     const sid = tile.dataset.sid;
+    if (e.target.closest('[data-pen]')) {
+      const on = !penOn(sid);
+      S.pen.by = { ...(S.pen.by || {}), [sid]: on };
+      S.db.set(`rooms/${S.room}/pen/by/${sid}`, on);
+      renderGrid();
+      return;
+    }
+    if (e.target.closest('[data-collab]')) { openCollab(sid); return; }
     const btn = e.target.closest('[data-mark]');
     if (btn) {
       const k = btn.parentElement.dataset.key;
@@ -588,6 +763,7 @@ function bind() {
 }
 
 async function init() {
+  applyTheme(S.theme);
   S.db = await openDb();
   if (S.db.mode === 'local') {
     const note = $('#modeNote');

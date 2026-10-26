@@ -14,7 +14,7 @@
 <!-- 設定畫面 -->
 <div id="setup" class="setup">
   <div class="setup-inner">
-    <h1>師生同步出題</h1>
+    <div class="row"><h1>師生同步出題</h1><span class="spacer"></span><label>畫面主題 <select class="theme-select"></select></label></div>
     <p id="modeNote" class="mode-note hidden"></p>
 
     <section class="card">
@@ -60,9 +60,11 @@
       <span class="muted">延長時間</span>
       <button data-add="10">+10秒</button><button data-add="20">+20秒</button><button data-add="30">+30秒</button>
     </div>
+    <button id="penAllBtn">全班作答：開放中</button>
     <button id="endBtn" class="warn">直接結束作答</button>
     <button id="nextBtn" class="primary">開始第一題</button>
     <span class="spacer"></span>
+    <select class="theme-select" title="畫面主題"></select>
     <button id="showAll">全開</button>
     <button id="maskAll">全遮</button>
     <button id="earlyEnd" class="danger">提早結束</button>

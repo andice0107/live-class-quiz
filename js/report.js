@@ -1,6 +1,7 @@
 // 成績畫面與試算表匯出
 import { TYPES, answerText, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, esc, textHtml, showModal } from './util.js';
+import { paintInkThumb, useGrid } from './ink.js';
 
 export function computeScores(S, r) {
   const out = {};
@@ -120,20 +121,23 @@ function showQuestion(S, r, k) {
     const a = ans[sid];
     const m = Q.marks[sid];
     let body = '<span class="muted">（空白）</span>';
-    if (a && a.v !== undefined && a.v !== null && a.v !== '') {
-      if (input === 'draw') body = `<img src="${a.v}" alt="">`;
+    if (input === 'draw' && (S.ink[k] || {})[sid]) body = `<canvas class="ans-ink" data-sid="${esc(sid)}"></canvas>`;
+    else if (a && a.v !== undefined && a.v !== null && a.v !== '') {
+      if (input === 'draw') body = `<canvas class="ans-ink" data-sid="${esc(sid)}"></canvas>`;
       else if (input === 'choice') body = `<b>${letter(a.v)}</b>${a.submitted ? '' : ' <span class="muted small">（沒按確認）</span>'}`;
       else body = textHtml(a.v);
     }
     return `<div class="ans-card ${m === true ? 'ok' : m === false ? 'no' : ''}"><div class="ans-sid">${esc(sid)} ${m === true ? '○' : m === false ? '✕' : '？'}</div><div class="ans-body">${body}</div></div>`;
   }).join('');
-  showModal(`
+  const modal = showModal(`
     ${step.item.type === 'group' ? `<details class="passage-box"><summary>題組文章</summary>${passageHtml(step.item)}</details>` : ''}
     ${questionHtml(Q.q, { label: `第 ${Q.label} 題` })}
     ${Q.q.type === 'choice' ? optionsHtml(Q.q, { correct: Q.q.answer }) : ''}
     <div class="answer-mid">答案：${textHtml(answerText(Q.q))}</div>
     <p>答對率 <b>${st.rate ?? '-'}%</b>（${st.right}/${st.n}）　平均作答 <b>${st.avgSec ?? '-'}</b> 秒　空白 <b>${st.blank}</b> 人</p>
+    ${Q.q.explanation ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(Q.q.explanation)}</div>` : ''}
     <div class="ans-grid">${answers}</div>`);
+  for (const cv of modal.querySelectorAll('canvas.ans-ink')) paintInkThumb(cv, (S.ink[k] || {})[cv.dataset.sid], { grid: useGrid(Q.q) });
 }
 
 function exportXlsx(S, r) {
@@ -154,18 +158,18 @@ function exportXlsx(S, r) {
   const ws1 = XLSX.utils.aoa_to_sheet([head, ...rows, [], ...statRows]);
   ws1['!cols'] = [{ wch: 12 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, ...keys.map(() => ({ wch: 7 }))];
 
-  const qHead = ['題號', '題型', '題目', '選項', '答案', '答對率(%)', '平均作答秒數', '空白人數', '題組文章'];
+  const qHead = ['題號', '題型', '題目', '選項', '答案', '詳解', '答對率(%)', '平均作答秒數', '空白人數', '題組文章'];
   const qRows = keys.map(k => {
     const Q = r.questions[k];
     const st = questionStats(S, r, k);
     const step = r.steps[Q.step];
     return [Q.label, TYPES[Q.q.type].label, Q.q.prompt + (Q.q.images?.length ? '（含圖片）' : ''),
       Q.q.options ? Q.q.options.map((o, i) => `${letter(i)}. ${o.text}`).join('\n') : '',
-      answerText(Q.q), st.rate ?? '', st.avgSec ?? '', st.blank,
+      answerText(Q.q), Q.q.explanation || '', st.rate ?? '', st.avgSec ?? '', st.blank,
       step.item.type === 'group' ? step.item.passage : ''];
   });
   const ws2 = XLSX.utils.aoa_to_sheet([qHead, ...qRows]);
-  ws2['!cols'] = [{ wch: 6 }, { wch: 8 }, { wch: 40 }, { wch: 30 }, { wch: 16 }, { wch: 9 }, { wch: 10 }, { wch: 8 }, { wch: 40 }];
+  ws2['!cols'] = [{ wch: 6 }, { wch: 8 }, { wch: 40 }, { wch: 30 }, { wch: 16 }, { wch: 30 }, { wch: 9 }, { wch: 10 }, { wch: 8 }, { wch: 40 }];
 
   const ansHead = ['學生代號', ...keys.map(k => `第${r.questions[k].label}題`)];
   const ansRows = sids.map(sid => [sid, ...keys.map(k => {

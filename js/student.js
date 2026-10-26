@@ -1,7 +1,8 @@
 import { openDb } from './db.js';
 import { TYPES, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, esc, textHtml, sha256, fmtTime, throttle, ID_PATTERN, stripNonAlnum, enableImageZoom } from './util.js';
-import { Pad } from './pad.js';
+import { buildCells, defaultCells, useGrid, paintInkThumb, cellData } from './ink.js';
+import { applyTheme } from './theme.js';
 
 const app = $('#app');
 const room = new URLSearchParams(location.search).get('r');
@@ -11,11 +12,14 @@ const S = {
   db: null,
   sid: null,
   cur: null,          // 老師目前的題目狀態
-  drafts: {},         // qkey -> {v, submitted, strokes}
+  drafts: {},         // qkey -> {v, submitted, n, cells:[{s,t,seen}]}
   sub: 0,             // 題組目前做到第幾小題
   viewSig: '',
-  pad: null,
+  cells: null,        // 目前畫面上的田字格
+  inkUnsub: null,
+  pen: null,          // 老師的作答開關
   score: null,
+  theme: null,
 };
 
 // ---------- 加入 ----------
@@ -62,16 +66,27 @@ async function join(sid, existing) {
   });
   S.db.on(`rooms/${room}/current`, v => { S.cur = v; render(); });
   S.db.on(`rooms/${room}/scores/${sid}`, v => { S.score = v; if (S.cur?.phase === 'finished') render(true); });
-  S.db.on(`rooms/${room}/meta`, v => { if (!v) { S.cur = { phase: 'closed' }; render(true); } });
+  S.db.on(`rooms/${room}/pen`, v => { S.pen = v; updateSendState(); });
+  S.db.on(`rooms/${room}/meta`, v => {
+    if (!v) { S.cur = { phase: 'closed' }; render(true); return; }
+    if (v.theme && v.theme !== S.theme) { S.theme = v.theme; applyTheme(v.theme); render(true); }
+  });
 }
 
 // ---------- 畫面 ----------
 
-function locked() {
+function penAllowed() {
+  const p = S.pen || {};
+  const mine = p.by ? p.by[S.sid] : undefined;
+  return mine ?? p.all ?? true;
+}
+
+function timeUp() {
   const c = S.cur;
   if (!c || c.phase !== 'answering') return true;
   return !!(c.endsAt && S.db.now() >= c.endsAt);
 }
+const locked = () => timeUp() || !penAllowed();
 
 function render(force = false) {
   const c = S.cur;
@@ -79,6 +94,8 @@ function render(force = false) {
   const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}`;
   if (!force && sig === S.viewSig) { tick(); return; }
   S.viewSig = sig;
+  if (S.inkUnsub) { S.inkUnsub(); S.inkUnsub = null; }
+  S.cells = null;
   if (phase === 'answering') renderQuestion();
   else if (phase === 'revealed') renderReveal();
   else if (phase === 'finished') renderFinal();
@@ -94,7 +111,6 @@ function header() {
 }
 
 function renderMessage(msg) {
-  S.pad = null;
   app.className = 's-app';
   app.innerHTML = `${header()}<main class="s-msg"><div>${esc(msg)}</div></main>`;
 }
@@ -106,14 +122,19 @@ function curQ() {
   return { q, key: keys()[0], group: null };
 }
 
-function draft(key) { return S.drafts[key] || (S.drafts[key] = { v: null, submitted: false, strokes: [] }); }
+function draft(key, q) {
+  if (!S.drafts[key]) {
+    const n = q ? defaultCells(q) : 1;
+    S.drafts[key] = { v: null, submitted: false, n, cells: Array.from({ length: n }, () => ({ s: [], t: [], seen: 0 })) };
+  }
+  return S.drafts[key];
+}
 
 function renderQuestion() {
-  const c = S.cur;
   // 新的一題：題組從第一小題開始
   if (S.lastKeys !== keys().join(',')) { S.lastKeys = keys().join(','); S.sub = 0; }
   const { q, key, group } = curQ();
-  const d = draft(key);
+  const d = draft(key, q);
   const input = TYPES[q.type].input;
   const subNav = group ? `<div class="sub-nav">
       <button id="prevSub" ${S.sub === 0 ? 'disabled' : ''}>◀ 上一小題</button>
@@ -121,13 +142,14 @@ function renderQuestion() {
       <button id="nextSub" ${S.sub + 1 >= group.subs.length || !d.submitted ? 'disabled' : ''}>下一小題 ▶</button></div>` : '';
   let answerArea = '';
   if (input === 'draw') {
-    answerArea = `<div class="pad-wrap"><canvas id="pad" class="pad"></canvas></div>`;
+    const chooser = q.type === 'word' && !q.cells
+      ? `<div class="cell-count"><span>這個詞有幾個字？</span>${[2, 3, 4].map(n => `<button data-n="${n}" class="${d.n === n ? 'on' : ''}">${n} 格</button>`).join('')}</div>` : '';
+    answerArea = `<div class="draw-area">${chooser}<div id="cells"></div></div>`;
   } else if (input === 'text') {
     answerArea = `<textarea id="txt" class="s-text" placeholder="在這裡打字作答">${esc(d.v || '')}</textarea>`;
   } else {
     answerArea = `<div class="s-options">${optionsHtml(q, { selected: d.v, clickable: true })}</div>`;
   }
-  const tools = input === 'draw' ? `<button id="undoBtn">↶ 復原</button><button id="clearBtn">清除</button>` : '';
   const sendLabel = input === 'choice' ? '確認送出' : '送出';
   app.className = `s-app answering ${group ? 'is-group' : ''} input-${input}`;
   app.innerHTML = `${header()}
@@ -136,7 +158,8 @@ function renderQuestion() {
       ${questionHtml(q, { label: group ? `第 ${S.sub + 1} 小題` : '' })}
     </section>
     <section class="s-answer">${answerArea}</section>
-    <footer class="s-actions">${tools}${subNav}<span class="spacer"></span><span id="sendState" class="send-state"></span>
+    <div id="penOff" class="pen-off hidden">老師暫停了作答，請看老師的說明</div>
+    <footer class="s-actions">${subNav}<span class="spacer"></span><span id="sendState" class="send-state"></span>
       <button id="sendBtn" class="primary big">${sendLabel}</button></footer>`;
   bindQuestion(q, key, input);
   updateSendState();
@@ -145,32 +168,84 @@ function renderQuestion() {
 
 // 每一小題各自節流，切換小題時才不會漏送
 const pushers = {};
-function pushDraft(key, d) {
+function pushAnswer(key, d) {
+  // 按下送出時立刻傳，不等節流
+  if (d.submitted) {
+    S.db.set(`rooms/${room}/answers/${key}/${S.sid}`, { v: d.v, submitted: true, at: S.db.now() });
+    return;
+  }
   const f = pushers[key] || (pushers[key] = throttle((k, dd) => {
     S.db.set(`rooms/${room}/answers/${k}/${S.sid}`, { v: dd.v, submitted: dd.submitted, at: S.db.now() });
-  }, 600));
+  }, 500));
   f(key, d);
+}
+function pushCell(key, i, strokes) {
+  const id = `${key}/${i}`;
+  const f = pushers[id] || (pushers[id] = throttle((k, j, st) => {
+    S.db.set(`rooms/${room}/ink/${k}/${S.sid}/c/${j}/s`, st.length ? st : null);
+  }, 250));
+  f(key, i, strokes);
 }
 
 function bindQuestion(q, key, input) {
-  const d = draft(key);
-  const changed = () => { d.submitted = false; pushDraft(key, d); updateSendState(); };
+  const d = draft(key, q);
+  const changed = () => { d.submitted = false; pushAnswer(key, d); updateSendState(); };
   if (input === 'draw') {
-    S.pad = new Pad($('#pad'), {
-      onChange: () => {
-        d.strokes = S.pad.strokes;
-        d.v = S.pad.isEmpty() ? null : S.pad.toImage();
-        changed();
-      },
+    const container = $('#cells');
+    const build = () => {
+      S.cells = buildCells(container, d.n, {
+        own: 's', grid: useGrid(q),
+        onChange: (i, kind) => {
+          d.cells[i].s = S.cells[i].s;
+          pushCell(key, i, d.cells[i].s);
+          if (kind === 'end') {
+            d.v = d.cells.some(c => c.s.length) ? d.n : null;
+            changed();
+          }
+        },
+      });
+      S.cells.forEach((c, i) => { c.s = d.cells[i].s; c.t = d.cells[i].t; c.redraw(); });
+      S.db.set(`rooms/${room}/ink/${key}/${S.sid}/n`, d.n);
+      updateSendState();
+    };
+    build();
+    // 老師的紅筆，以及老師要求清掉學生筆劃
+    S.inkUnsub = S.db.on(`rooms/${room}/ink/${key}/${S.sid}/c`, v => {
+      const list = Array.isArray(v) ? v : v ? Object.values(v) : [];
+      for (let i = 0; i < d.n; i++) {
+        const raw = (Array.isArray(v) ? v[i] : v && v[i]) || null;
+        const cd = cellData(raw);
+        d.cells[i].t = cd.t;
+        if (S.cells && S.cells[i]) S.cells[i].setOther(cd.t);
+        const clr = raw && raw.clearS;
+        if (clr && clr > (d.cells[i].seen || 0)) {
+          d.cells[i].seen = clr;
+          d.cells[i].s = [];
+          if (S.cells && S.cells[i]) S.cells[i].wipeMine();
+        }
+      }
+      void list;
     });
-    S.pad.load(d.strokes);
-    $('#undoBtn').onclick = () => !locked() && S.pad.undo();
-    $('#clearBtn').onclick = () => !locked() && S.pad.clear();
+    const chooser = $('.cell-count');
+    if (chooser) chooser.addEventListener('click', e => {
+      const b = e.target.closest('[data-n]');
+      if (!b || locked()) return;
+      const n = Number(b.dataset.n);
+      if (n === d.n) return;
+      const lost = d.cells.slice(n).some(c => c.s.length);
+      if (lost && !confirm('格子變少，最後面那幾格寫的字會被刪掉，確定嗎？')) return;
+      while (d.cells.length < n) d.cells.push({ s: [], t: [], seen: 0 });
+      for (let i = n; i < d.cells.length; i++) pushCell(key, i, []);
+      d.cells = d.cells.slice(0, n);
+      d.n = n;
+      for (const x of chooser.querySelectorAll('[data-n]')) x.classList.toggle('on', Number(x.dataset.n) === n);
+      build();
+      d.v = d.cells.some(c => c.s.length) ? d.n : null;
+      changed();
+    });
   } else if (input === 'text') {
-    S.pad = null;
     $('#txt').addEventListener('input', e => { d.v = e.target.value; changed(); });
   } else {
-    S.pad = null;
     $('.s-options').addEventListener('click', e => {
       const b = e.target.closest('[data-opt]');
       if (!b || locked()) return;
@@ -182,7 +257,7 @@ function bindQuestion(q, key, input) {
   $('#sendBtn').onclick = () => {
     if (locked() || d.v === null || d.v === '') return;
     d.submitted = true;
-    pushDraft(key, d);
+    pushAnswer(key, d);
     updateSendState();
     const nb = $('#nextSub');
     if (nb && S.sub + 1 < S.cur.q.subs.length) nb.disabled = false;
@@ -196,16 +271,20 @@ function bindQuestion(q, key, input) {
 
 function updateSendState() {
   if (S.cur?.phase !== 'answering') return;
-  const { key } = curQ();
-  const d = draft(key);
   const st = $('#sendState');
-  const btn = $('#sendBtn');
   if (!st) return;
-  const lock = locked();
-  st.textContent = lock ? '時間到，不能再作答' : d.submitted ? '✓ 已送出（還可以修改）' : (d.v === null || d.v === '' ? '' : '還沒送出');
+  const { key, q } = curQ();
+  const d = draft(key, q);
+  const btn = $('#sendBtn');
+  const up = timeUp();
+  const pen = penAllowed();
+  const lock = up || !pen;
+  st.textContent = up ? '時間到，不能再作答' : !pen ? '暫停作答' : d.submitted ? '✓ 已送出（還可以修改）' : (d.v === null || d.v === '' ? '' : '還沒送出');
   st.className = 'send-state' + (d.submitted ? ' ok' : '');
   btn.disabled = lock || d.v === null || d.v === '';
-  if (S.pad) S.pad.setEnabled(!lock);
+  $('#penOff').classList.toggle('hidden', pen || up);
+  if (S.cells) for (const c of S.cells) c.setEnabled(!lock);
+  app.classList.toggle('pen-locked', lock);
   const t = $('#txt');
   if (t) t.disabled = lock;
 }
@@ -223,29 +302,37 @@ function tick() {
 }
 setInterval(tick, 250);
 
+function revealOf(key) {
+  const r = S.cur.reveal?.[key];
+  return typeof r === 'string' ? { a: r } : (r || {});
+}
+
 function myAnswerHtml(q, key) {
   const d = S.drafts[key];
   const input = TYPES[q.type].input;
+  if (input === 'draw') {
+    if (!d || !d.cells.some(c => c.s.length || c.t.length)) return '<span class="muted">（沒有作答）</span>';
+    return `<canvas class="my-ink" data-key="${esc(key)}"></canvas>`;
+  }
   if (!d || d.v === null || d.v === '' || d.v === undefined) return '<span class="muted">（沒有作答）</span>';
-  if (input === 'draw') return `<img class="my-img" src="${d.v}" alt="">`;
   if (input === 'choice') return `<b>${letter(d.v)}</b>${d.submitted ? '' : '（沒有按確認）'}`;
   return textHtml(d.v);
 }
 
 function revealBlock(q, key, label) {
-  const ans = S.cur.reveal?.[key] ?? '';
+  const { a = '', e = '' } = revealOf(key);
   const input = TYPES[q.type].input;
   const d = S.drafts[key];
-  return `<div class="reveal-q">
+  return `<div class="reveal-q ${e ? 'has-exp' : ''}">
     ${questionHtml(q, { label })}
     ${q.type === 'choice' ? optionsHtml(q, { selected: d && d.submitted ? d.v : null }) : ''}
     <div class="reveal-label">正確答案</div>
-    <div class="${input === 'draw' ? 'answer-big' : 'answer-mid'}">${textHtml(ans)}</div>
+    <div class="${input === 'draw' && [...a].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(a)}</div>
+    ${e ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(e)}</div>` : ''}
     <div class="mine"><span class="muted">你的答案：</span>${myAnswerHtml(q, key)}</div></div>`;
 }
 
 function renderReveal() {
-  S.pad = null;
   const q = S.cur.q;
   const ks = keys();
   let body;
@@ -255,20 +342,23 @@ function renderReveal() {
   } else body = revealBlock(q, ks[0], '');
   app.className = 's-app revealed';
   app.innerHTML = `${header()}<main class="s-reveal">${body}</main>`;
-  // 選擇題的正確選項標出來
-  if (q.type !== 'group' && q.type === 'choice') markChoice(app, q, ks[0]);
-  if (q.type === 'group') q.subs.forEach((sq, j) => sq.type === 'choice' && markChoice(app.querySelectorAll('.reveal-q')[j], sq, ks[j]));
+  const subs = q.type === 'group' ? q.subs : [q];
+  const blocks = app.querySelectorAll('.reveal-q');
+  subs.forEach((sq, j) => { if (sq.type === 'choice') markChoice(blocks[j], ks[j]); });
+  for (const cv of app.querySelectorAll('canvas.my-ink')) {
+    const d = S.drafts[cv.dataset.key];
+    paintInkThumb(cv, { n: d.n, c: d.cells }, { grid: true });
+  }
 }
 
-function markChoice(root, q, key) {
-  const ans = S.cur.reveal?.[key] || '';
+function markChoice(root, key) {
+  const ans = revealOf(key).a || '';
   const i = 'ABCDEFGH'.indexOf(ans[0]);
   const opts = root.querySelectorAll('.option');
   if (opts[i]) opts[i].classList.add('correct');
 }
 
 function renderFinal() {
-  S.pad = null;
   const s = S.score;
   app.className = 's-app';
   app.innerHTML = `${header()}<main class="s-final">

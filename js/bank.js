@@ -1,5 +1,6 @@
 // 題庫格式、題型與題目顯示
 import { esc, textHtml } from './util.js';
+import { defaultCells } from './ink.js';
 
 // input：draw 手寫板、text 打字、choice 點選
 // time：預設作答秒數，0 代表無限時
@@ -63,6 +64,9 @@ function normQuestion(raw, id, errors, where) {
     images: raw.images || (raw.image ? [raw.image] : []),
     answer: raw.answer ?? '',
   };
+  const exp = raw.explanation ?? raw.詳解 ?? raw.解析 ?? raw.analysis;
+  if (exp) q.explanation = String(exp);
+  if (raw.cells) q.cells = Number(raw.cells);
   if (raw.time !== undefined && raw.time !== null && raw.time !== '') q.time = Number(raw.time);
   if (type === 'choice') {
     q.options = normOptions(raw.options);
@@ -105,7 +109,9 @@ export async function readBankFile(file) {
 
 // 給學生看的版本：拿掉答案
 export function publicQuestion(q) {
-  const { answer, ...rest } = q;
+  // 格數要在拿掉答案前算好（例如寫國字依答案字數決定格數）
+  if (TYPES[q.type].input === 'draw' && !q.cells && q.type !== 'word') q = { ...q, cells: defaultCells(q) };
+  const { answer, explanation, ...rest } = q;
   return rest;
 }
 
