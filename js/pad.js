@@ -66,14 +66,14 @@ export class Pad {
   }
 
   // 縮小成圖片，傳給老師端的縮圖
-  toImage(maxW = 420) {
+  toImage(maxW = 300) {
     const r = this.canvas.getBoundingClientRect();
     const w = Math.min(maxW, Math.round(r.width));
     const h = Math.max(1, Math.round(w * r.height / Math.max(1, r.width)));
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     paint(c.getContext('2d'), w, h, this.strokes, { ink: this.ink, guide: false, bg: '#1f242b' });
-    return c.toDataURL('image/jpeg', 0.7);
+    return c.toDataURL('image/jpeg', 0.55);
   }
 }
 
