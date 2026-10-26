@@ -100,10 +100,21 @@ export function normalizeBank(raw, fileTag = 'bank') {
 }
 
 export async function readBankFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const tag = file.name.replace(/\.[^.]+$/, '');
+  if (ext === 'docx') {
+    const { readDocxBank } = await import('./docx-import.js');
+    const raw = await readDocxBank(file);
+    const bank = normalizeBank(raw, tag);
+    bank.errors = raw.errors.concat(bank.errors);
+    return bank;
+  }
+  if (ext === 'doc' || ext === 'pdf') {
+    throw new Error(`「${file.name}」是 ${ext.toUpperCase()} 檔，工具沒辦法直接讀。請把它傳給 Claude 轉成題庫檔；如果是照「Word 題庫範本」寫的，請在 Word 裡「另存新檔」成 .docx 再載入。`);
+  }
   const text = await file.text();
   let raw;
-  try { raw = JSON.parse(text); } catch { throw new Error(`「${file.name}」不是題庫檔（需要 .json 題庫檔）`); }
-  const tag = file.name.replace(/\.[^.]+$/, '');
+  try { raw = JSON.parse(text); } catch { throw new Error(`「${file.name}」不是題庫檔（可以載入 .json 題庫檔，或照「Word 題庫範本」寫的 .docx）`); }
   return normalizeBank(raw, tag);
 }
 

@@ -149,3 +149,14 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .collab-q { padding: .4em 1em; max-height: 22vh; overflow: auto; border-bottom: 1px solid var(--line); }
 .collab-cells { flex: 1; min-height: 0; padding: .8em; }
 .collab-note { margin: 0; padding: .3em 1em .6em; }
+
+a.button-link { color: var(--text); text-decoration: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: .45em .9em; font-weight: 600; }
+a.button-link:hover { border-color: var(--accent); }
+
+.drop-zone { border: 2px dashed var(--line); border-radius: var(--radius); padding: 1.2em; text-align: center; color: var(--muted); font-weight: 700; margin: .4em 0 .6em; }
+.setup.dragging .drop-zone { border-color: var(--accent); background: var(--ok-bg); color: var(--text); }
+.setup.dragging::after {
+  content: '放開滑鼠，就會載入題庫'; position: fixed; inset: 12px; border: 4px dashed var(--accent); border-radius: 20px;
+  display: grid; place-items: center; font-size: 2rem; font-weight: 800; color: var(--text); background: color-mix(in srgb, var(--bg) 80%, transparent); pointer-events: none; z-index: 60;
+}
+.row .spacer { flex: 1; }

@@ -21,11 +21,14 @@
     <section class="card">
       <h2>1. 載入題庫</h2>
       <div class="row">
-        <label class="file-btn"><input id="bankFile" type="file" accept=".json,application/json" multiple hidden>選擇題庫檔</label>
+        <label class="file-btn"><input id="bankFile" type="file" accept=".json,.docx,.doc,.pdf" multiple hidden>選擇題庫檔</label>
+        <a class="button-link" href="samples/題庫範本.docx" download>下載 Word 題庫範本</a>
         <button id="sampleBtn">載入範例題庫</button>
         <button id="previewBtn" disabled>預覽全部題目</button>
       </div>
+      <div class="drop-zone">把題庫檔拖拉到這裡，或按上面的「選擇題庫檔」</div>
       <div id="bankInfo" class="muted">尚未載入題庫。</div>
+      <p class="muted small">可以載入：Claude 轉好的 .json 題庫檔，或照「Word 題庫範本」格式寫的 .docx。現成考卷（doc、docx、pdf）請傳給 Claude 轉換。</p>
       <div id="bankErrors" class="errors hidden"></div>
     </section>
 

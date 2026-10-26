@@ -664,13 +664,31 @@ function renderPenAll() {
 // ---------- 事件 ----------
 
 function bind() {
-  $('#bankFile').addEventListener('change', async e => {
-    for (const f of e.target.files) {
+  const loadFiles = async files => {
+    $('#bankInfo').textContent = '讀取中…';
+    for (const f of files) {
       try { S.banks.push(await readBankFile(f)); } catch (err) { alert(err.message); }
     }
-    e.target.value = '';
     rebuildItems();
     renderBankInfo();
+  };
+  $('#bankFile').addEventListener('change', e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    loadFiles(files);
+  });
+  // 把檔案拖拉到設定畫面任何地方都可以載入
+  const setup = $('#setup');
+  let depth = 0;
+  setup.addEventListener('dragenter', e => { e.preventDefault(); depth++; setup.classList.add('dragging'); });
+  setup.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; setup.classList.remove('dragging'); } });
+  setup.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  setup.addEventListener('drop', e => {
+    e.preventDefault();
+    depth = 0;
+    setup.classList.remove('dragging');
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) loadFiles(files);
   });
   $('#sampleBtn').addEventListener('click', async () => {
     const raw = await (await fetch('samples/sample-bank.json')).json();
