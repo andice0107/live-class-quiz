@@ -14,14 +14,16 @@ export function themeColors() {
 const q3 = n => Math.round(n * 1000) / 1000;
 
 // 依題型決定格數；造詞由學生自己選 2～4 格
+// 一題最多幾個田字格（考卷上一段改錯常有 8、9 格）
+export const MAX_CELLS = 10;
 export function defaultCells(q) {
-  if (q.cells) return Math.max(1, Math.min(8, Number(q.cells)));
+  if (q.cells) return Math.max(1, Math.min(MAX_CELLS, Number(q.cells)));
   const ans = String(q.answer ?? '');
-  const han = s => (s.match(/[㐀-鿿豈-﫿]/g) || []).length;
+  const han = s => (s.match(/[㐀-鿿豈-﫿]/g) || []).length;
   switch (q.type) {
-    case 'hanzi': return Math.max(1, Math.min(8, han(ans.split(/[|｜、,，]/)[0]) || 1));
-    case 'zhuyin': return Math.max(1, Math.min(8, ans.trim().split(/\s+/).filter(Boolean).length || 1));
-    case 'correction': return Math.max(1, Math.min(4, han(ans.split(/→|->|改成|＞|>/).pop()) || 1));
+    case 'hanzi': return Math.max(1, Math.min(MAX_CELLS, guideChars('hanzi', ans).length || 1));
+    case 'zhuyin': return Math.max(1, Math.min(MAX_CELLS, ans.trim().split(/\s+/).filter(Boolean).length || 1));
+    case 'correction': return Math.max(1, Math.min(MAX_CELLS, han(ans.split(/→|->|改成|＞|>/).pop()) || 1));
     case 'word': return 2;
     default: return 1;
   }
@@ -32,7 +34,8 @@ export const useGrid = q => q.type !== 'write';
 const HAN = /[\u3400-\u9fff\uf900-\ufaff]/g;
 export function guideChars(type, answer) {
   const a = String(answer ?? '');
-  if (type === 'hanzi') return a.split(/[|｜、,，]/)[0].match(HAN) || [];
+  // 寫國字的答案裡可以夾注音（例如「偷 ㄐㄧㄝˇ 招」）：國字一字一格，一組注音一格
+  if (type === 'hanzi') return a.split(/[|｜、,，]/)[0].match(/[\u3400-\u9fff\uf900-\ufaff]|[\u3105-\u312f˙ˊˇˋ]+/g) || [];
   if (type === 'correction') return a.split(/→|->|改成|＞|>/).pop().match(HAN) || [];
   if (type === 'zhuyin') return a.trim().split(/\s+/).filter(Boolean);
   return [];
