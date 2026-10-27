@@ -178,3 +178,28 @@ canvas.cell.locked { cursor: not-allowed; }
 .cell-tools button { padding: 0 .1em; font-size: 1.05rem; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
 .cell-tools button span { font-size: .72rem; font-weight: 600; }
 .cell-tools button.on { background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn); }
+
+/* 部件提示 */
+.cell-tools button.hint-btn { background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn); }
+.hint-cards { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.hint-card { width: 120px; height: 120px; padding: 10px; background: var(--panel-2); border: 2px solid var(--line); border-radius: 14px; display: grid; place-items: center; }
+.hint-card svg, .hint-first svg { width: 100%; height: 100%; display: block; fill: var(--text); }
+button.hint-card { cursor: pointer; transition: opacity .15s; }
+button.hint-card.off { opacity: .2; border-style: dashed; }
+.hint-strokes { display: flex; gap: 20px; align-items: center; justify-content: center; }
+.hint-count { font-size: 3rem; font-weight: 800; color: var(--warn); }
+.hint-first { width: 150px; text-align: center; }
+.hint-first svg { height: 150px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.hint-first .hint-grid { fill: none; stroke: var(--line); stroke-width: 14; stroke-dasharray: 50 40; }
+.hint-ov { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 70%, transparent); display: grid; place-items: center; padding: 16px; }
+.hint-box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2em; max-width: 760px; width: 100%; max-height: 100%; overflow: auto; display: grid; gap: 1em; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.hint-title { font-size: 1.5rem; font-weight: 800; }
+.hint-box .muted { margin: 0; }
+.hint-pre { margin-top: .8em; padding-top: .6em; border-top: 1px dashed var(--line); }
+.hint-pre .hint-card { width: 64px; height: 64px; padding: 5px; border-radius: 10px; }
+.hint-pre .hint-cards { justify-content: flex-start; gap: 6px; }
+.hint-pre .hint-count { font-size: 1.6rem; }
+.hint-pre .hint-first { width: 80px; }
+.hint-pre .hint-first svg { height: 80px; }
+.hint-pre-cell { margin: .4em 0; }
+.hint-mark { font-size: .8em; margin-left: 2px; }

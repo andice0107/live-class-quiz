@@ -4,6 +4,7 @@ import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal
 import { renderSummary, computeScores } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { THEMES, applyTheme, savedTheme, saveTheme } from './theme.js';
+import { questionHints, hintCardsHtml } from './hints.js';
 
 const USED_KEY = 'lcq-used';
 
@@ -21,6 +22,9 @@ const S = {
   ink: {},              // qkey -> sid -> {n, c:[{s,t,clearS}]}
   pen: { all: true, by: {} },  // 學生作答（畫筆）開關
   guide: true,          // 公布答案後，田字格裡顯示半透明範字
+  hintOn: false,        // 這一題是否開放部件提示
+  hintPrep: null,       // 準備部件提示中（Promise）
+  hintUsed: {},         // qkey -> sid -> 第一次看提示的時間
   collab: null,         // 正在協助的學生手寫板
   theme: savedTheme(),
   unsub: [],
@@ -177,8 +181,22 @@ function newRound(settings) {
   });
   S.rounds.push(round);
   S.round = round;
+  S.hintPrep = prepareHints(round);
   return round;
 }
+
+// 抽好題目就先在背景準備寫國字的部件提示，換題時老師一按就能開放
+async function prepareHints(round) {
+  let failed = 0;
+  for (const Q of Object.values(round.questions)) {
+    if (Q.q.type !== 'hanzi') continue;
+    try { Q.hints = await questionHints(Q.q, guideChars('hanzi', answerText(Q.q))); } catch { failed++; }
+  }
+  return failed;
+}
+
+const stepHints = step => step ? step.keys.filter(k => S.round.questions[k].hints) : [];
+const stepHasHanzi = step => !!step && step.keys.some(k => S.round.questions[k].q.type === 'hanzi');
 
 function stepTime(step) {
   const it = step.item;
@@ -253,7 +271,14 @@ async function startStep(i) {
   S.unsub = step.keys.flatMap(k => [
     S.db.on(`rooms/${S.room}/answers/${k}`, v => { S.answers[k] = v || {}; renderGrid(); renderQPanel(); }),
     S.db.on(`rooms/${S.room}/ink/${k}`, v => { S.ink[k] = v || {}; renderGrid(); }),
+    S.db.on(`rooms/${S.room}/hintUsed/${k}`, v => {
+      S.hintUsed[k] = v || {};
+      r.questions[k].hintUsed = Object.keys(v || {});
+      renderGrid();
+    }),
   ]);
+  // 每一題開始時，部件提示先關閉，由老師決定要不要開
+  S.hintOn = false;
   // 每一題開始時，全班都可以作答
   S.pen = { all: true, by: {} };
   await S.db.set(`rooms/${S.room}/pen`, S.pen);
@@ -277,7 +302,8 @@ async function endStep() {
     Q.participants = present;
   }
   S.guide = true;
-  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, endsAt: null, endedAt: S.db.now() });
+  S.hintOn = false;
+  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, hint: null, endsAt: null, endedAt: S.db.now() });
   const guides = step.keys.flatMap(k => guideChars(S.round.questions[k].q.type, answerText(S.round.questions[k].q)));
   if (guides.length) ensureKai(guides).then(() => { tileSigs = new WeakMap(); renderGrid(); });
   renderRun();
@@ -352,6 +378,7 @@ function renderRun() {
   $('#endBtn').classList.toggle('hidden', phase !== 'answering');
   $('#penAllBtn').classList.toggle('hidden', phase !== 'answering');
   renderPenAll();
+  renderHintBtn();
   $('#extendBox').classList.toggle('hidden', !(phase === 'answering' && endsAt));
   const nb = $('#nextBtn');
   nb.classList.toggle('hidden', phase === 'answering');
@@ -400,6 +427,7 @@ function renderQPanel() {
         ${q.type === 'choice' ? optionsHtml(q, { correct: revealed || S.showAnswer ? q.answer : null }) : ''}
         ${revealed || S.showAnswer ? `<div class="answer-mid">答案：${textHtml(answerText(q))}</div>${explainHtml(q)}` : ''}</div>`;
     });
+    if (!revealed) html += hintPreviewHtml(step);
     html += `</div><div class="sub-tabs">${tabs.join('')}</div>`;
   } else {
     const k = step.keys[0];
@@ -409,6 +437,7 @@ function renderQPanel() {
       ${q.type === 'choice' ? optionsHtml(q, { correct: showAns ? q.answer : null }) : ''}
       ${showAns && q.type !== 'choice' ? `<div class="${TYPES[q.type].input === 'draw' && [...answerText(q)].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(answerText(q))}</div>` : ''}
       ${showAns ? explainHtml(q) : ''}
+      ${revealed ? '' : hintPreviewHtml(step)}
       </div><div class="q-foot"><span>已送出 ${submittedCount(k)} / ${n}</span></div>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
@@ -525,7 +554,8 @@ function fillTile(el, sid, step) {
   const a = (S.answers[k] || {})[sid];
   const input = TYPES[Q.q.type].input;
   const subInfo = step.item.type === 'group' ? `第 ${Q.label.split('-')[1]} 小題・` : '';
-  $('.st', el).textContent = st.online === false ? '離線' : subInfo + (a ? (a.submitted ? '已送出' : '作答中') : '未作答');
+  const usedHint = !!(S.hintUsed[k] || {})[sid];
+  $('.st', el).textContent = st.online === false ? '離線' : subInfo + (a ? (a.submitted ? '已送出' : '作答中') : '未作答') + (usedHint ? '・💡看過提示' : '');
   el.classList.toggle('submitted', !!(a && a.submitted));
   const allowed = penOn(sid);
   el.classList.toggle('pen-off', !allowed);
@@ -654,6 +684,49 @@ function setTheme(name) {
   renderGrid();
 }
 
+function renderHintBtn() {
+  const b = $('#hintBtn');
+  b.classList.toggle('hidden', !(phase === 'answering' && stepHasHanzi(current())));
+  b.textContent = S.hintOn ? '部件提示：開放中' : '部件提示：關閉';
+  b.classList.toggle('primary', S.hintOn);
+}
+
+async function toggleHints() {
+  const step = current();
+  if (phase !== 'answering' || !step) return;
+  if (S.hintOn) {
+    S.hintOn = false;
+    await S.db.update(`rooms/${S.room}/current`, { hint: null });
+    renderHintBtn(); renderQPanel();
+    return;
+  }
+  const b = $('#hintBtn');
+  b.textContent = '準備部件提示中…';
+  const failed = await S.hintPrep;
+  const ks = stepHints(step);
+  if (!ks.length) {
+    renderHintBtn();
+    alert(failed ? '讀不到部件資料，請確認網路後重新抽題。' : '這一題沒有可以用的部件提示（例如答案都是注音）。');
+    return;
+  }
+  if (phase !== 'answering' || current() !== step) return;
+  S.hintOn = true;
+  const data = Object.fromEntries(ks.map(k => [k, S.round.questions[k].hints]));
+  await S.db.update(`rooms/${S.room}/current`, { hint: { on: true, data } });
+  renderHintBtn(); renderQPanel();
+}
+
+// 老師端預覽：學生按 💡 會看到的內容
+function hintPreviewHtml(step) {
+  if (!S.hintOn) return '';
+  const blocks = stepHints(step).map(k => {
+    const Q = S.round.questions[k];
+    const cells = Q.hints.map((h, i) => h ? `<div class="hint-pre-cell"><div class="muted small">第 ${i + 1} 格</div>${hintCardsHtml(h)}</div>` : '').join('');
+    return `${step.keys.length > 1 ? `<div class="muted small">第 ${esc(Q.label)} 小題</div>` : ''}${cells}`;
+  }).join('');
+  return `<div class="hint-pre"><div class="reveal-label">部件提示（學生按 💡 才會看到）</div>${blocks}</div>`;
+}
+
 function renderPenAll() {
   const b = $('#penAllBtn');
   if (!b) return;
@@ -738,6 +811,7 @@ function bind() {
     sel.addEventListener('change', () => setTheme(sel.value));
   }
   $('#endBtn').addEventListener('click', endStep);
+  $('#hintBtn').addEventListener('click', toggleHints);
   $('#extendBox').addEventListener('click', async e => {
     const add = Number(e.target.dataset.add);
     if (!add || phase !== 'answering' || !endsAt) return;

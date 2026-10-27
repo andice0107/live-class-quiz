@@ -64,6 +64,7 @@ export function renderSummary(S, { onToggle, onNextRound }) {
         <button id="againBtn">出下一份題組</button>
       </header>
       ${early ? `<p class="mode-note">提早結束：只計算已經出過的 ${keys.length} 題（原本 ${r.order.length} 題）。</p>` : ''}
+      ${keys.some(k => (r.questions[k].hintUsed || []).length) ? '<p class="muted small">💡＝這一題有看部件提示。</p>' : ''}
       ${pending ? `<p class="mode-note">還有 ${pending} 格尚未批改（表格中的「？」），目前先算答錯。點格子可以改成對或錯，學生畫面上的分數會跟著更新。</p>` : ''}
       <div class="stat-cards">
         <div class="stat"><div class="muted">全班平均</div><div class="stat-num">${avg}</div></div>
@@ -80,6 +81,7 @@ export function renderSummary(S, { onToggle, onNextRound }) {
             <tr><th>答對率</th><td></td><td></td>${keys.map(k => `<td>${stats[k].rate ?? '-'}%</td>`).join('')}</tr>
             <tr><th>平均秒數</th><td></td><td></td>${keys.map(k => `<td>${stats[k].avgSec ?? '-'}</td>`).join('')}</tr>
             <tr><th>空白人數</th><td></td><td></td>${keys.map(k => `<td>${stats[k].blank}</td>`).join('')}</tr>
+            ${keys.some(k => r.questions[k].hints) ? `<tr><th>看提示人數</th><td></td><td></td>${keys.map(k => `<td>${r.questions[k].hints ? (r.questions[k].hintUsed || []).length : ''}</td>`).join('')}</tr>` : ''}
           </tfoot>
         </table>
       </div>`;
@@ -108,7 +110,8 @@ function cellHtml(Q, sid) {
   const m = Q.marks[sid];
   const cls = m === true ? 'ok' : m === false ? 'no' : 'pend';
   const sym = m === true ? '○' : m === false ? '✕' : '？';
-  return `<td class="cell ${cls}" data-k="${Q.key}" data-sid="${esc(sid)}">${sym}</td>`;
+  const hint = (Q.hintUsed || []).includes(sid) ? '<span class="hint-mark" title="看過部件提示">💡</span>' : '';
+  return `<td class="cell ${cls}" data-k="${Q.key}" data-sid="${esc(sid)}">${sym}${hint}</td>`;
 }
 
 function showQuestion(S, r, k) {
@@ -152,11 +155,13 @@ function exportXlsx(S, r) {
   const rows = sids.map(sid => [sid, scores[sid].score, scores[sid].correct, scores[sid].total, ...keys.map(k => {
     const Q = r.questions[k];
     if (!Q.participants.includes(sid)) return '—';
-    return Q.marks[sid] === true ? '○' : Q.marks[sid] === false ? '✕' : '未批改';
+    const hint = (Q.hintUsed || []).includes(sid) ? '（看提示）' : '';
+    return (Q.marks[sid] === true ? '○' : Q.marks[sid] === false ? '✕' : '未批改') + hint;
   })]);
   const statRows = [
     ['答對率(%)', '', '', '', ...keys.map(k => questionStats(S, r, k).rate ?? '')],
     ['平均作答秒數', '', '', '', ...keys.map(k => questionStats(S, r, k).avgSec ?? '')],
+    ['看提示人數', '', '', '', ...keys.map(k => (r.questions[k].hints ? (r.questions[k].hintUsed || []).length : ''))],
   ];
   const ws1 = XLSX.utils.aoa_to_sheet([head, ...rows, [], ...statRows]);
   ws1['!cols'] = [{ wch: 12 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, ...keys.map(() => ({ wch: 7 }))];

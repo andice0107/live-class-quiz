@@ -23,6 +23,7 @@
       <div class="row">
         <label class="file-btn"><input id="bankFile" type="file" accept=".json,.docx,.doc,.pdf" multiple hidden>選擇題庫檔</label>
         <a class="button-link" href="samples/題庫範本.docx" download>下載 Word 題庫範本</a>
+        <a class="button-link" href="docs/給AI的使用與轉檔說明.md" download title="把這個檔案交給 AI，它就知道怎麼幫你轉題庫">下載給 AI 的說明檔</a>
         <button id="sampleBtn">載入範例題庫</button>
         <button id="previewBtn" disabled>預覽全部題目</button>
       </div>
@@ -65,6 +66,7 @@
       <button data-add="10">+10秒</button><button data-add="20">+20秒</button><button data-add="30">+30秒</button>
     </div>
     <button id="penAllBtn">全班作答：開放中</button>
+    <button id="hintBtn" class="hidden">部件提示：關閉</button>
     <button id="endBtn" class="warn">直接結束作答</button>
     <button id="nextBtn" class="primary">開始第一題</button>
     <span class="spacer"></span>

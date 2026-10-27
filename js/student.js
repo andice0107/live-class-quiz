@@ -3,6 +3,7 @@ import { TYPES, questionHtml, passageHtml, optionsHtml, letter } from './bank.js
 import { $, esc, textHtml, sha256, fmtTime, throttle, ID_PATTERN, stripNonAlnum, enableImageZoom } from './util.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { applyTheme } from './theme.js';
+import { hintCardsHtml } from './hints.js';
 
 const app = $('#app');
 const room = new URLSearchParams(location.search).get('r');
@@ -92,7 +93,7 @@ function render(force = false) {
   const c = S.cur;
   const phase = c?.phase || 'waiting';
   const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}|${phase === 'revealed' ? c.guide !== false : ''}`;
-  if (!force && sig === S.viewSig) { tick(); return; }
+  if (!force && sig === S.viewSig) { tick(); syncHints(); return; }
   S.viewSig = sig;
   if (S.inkUnsub) { S.inkUnsub(); S.inkUnsub = null; }
   S.cells = null;
@@ -101,7 +102,78 @@ function render(force = false) {
   else if (phase === 'finished') renderFinal();
   else if (phase === 'closed') renderMessage('老師已經關閉這個教室。');
   else renderMessage('等老師出題…');
+  syncHints();
 }
+
+// ---------- 部件提示 ----------
+
+// 老師開放時，寫國字的每一格工具列多一個 💡；學生自己點開才看得到
+function hintsFor(key) {
+  const h = S.cur?.hint;
+  return h && h.on && h.data ? h.data[key] : null;
+}
+const hintAt = (list, i) => (list ? (Array.isArray(list) ? list[i] : list[i] ?? list[String(i)]) : null);
+
+function syncHints() {
+  const c = S.cur;
+  const ov = $('.hint-ov');
+  if (!c || c.phase !== 'answering' || !c.q) { if (ov) ov.remove(); return; }
+  const { q, key } = curQ();
+  const list = q && q.type === 'hanzi' ? hintsFor(key) : null;
+  if (!list && ov) ov.remove();
+  app.querySelectorAll('#cells .cell-box').forEach((box, i) => {
+    const tools = box.querySelector('.cell-tools');
+    let b = tools.querySelector('.hint-btn');
+    if (hintAt(list, i)) {
+      if (!b) {
+        b = document.createElement('button');
+        b.className = 'hint-btn';
+        b.dataset.hint = i;
+        b.title = '部件提示';
+        b.innerHTML = '💡<span>提示</span>';
+        tools.append(b);
+      }
+    } else if (b) b.remove();
+  });
+}
+
+function openHint(i) {
+  const { q, key } = curQ();
+  const h = hintAt(hintsFor(key), i);
+  if (!h) return;
+  const d = draft(key, q);
+  d.hintOff = d.hintOff || {};
+  const off = d.hintOff[i] || (d.hintOff[i] = []);
+  $('.hint-ov')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'hint-ov';
+  const draw = () => {
+    ov.innerHTML = `<div class="hint-box">
+      <div class="hint-title">第 ${i + 1} 格的提示</div>
+      ${hintCardsHtml(h, { clickable: true, off })}
+      ${h.kind === 'parts' ? '<p class="muted">裡面有幾個不是這個字的部件。點一下卡片，可以把你覺得「不是」的變灰；再點一次就恢復。</p>' : ''}
+      <button class="primary big" data-close>關閉，回去寫字</button></div>`;
+  };
+  draw();
+  ov.addEventListener('click', e => {
+    if (e.target === ov || e.target.closest('[data-close]')) { ov.remove(); return; }
+    const card = e.target.closest('[data-card]');
+    if (card) {
+      const j = Number(card.dataset.card);
+      const at = off.indexOf(j);
+      if (at >= 0) off.splice(at, 1); else off.push(j);
+      card.classList.toggle('off', at < 0);
+    }
+  });
+  app.append(ov);
+  // 讓老師知道誰看過提示（成績表也會標示）
+  S.db.set(`rooms/${room}/hintUsed/${key}/${S.sid}`, S.db.now());
+}
+
+app.addEventListener('click', e => {
+  const b = e.target.closest('.hint-btn');
+  if (b) { e.stopPropagation(); openHint(Number(b.dataset.hint)); }
+});
 
 function header() {
   const c = S.cur;
