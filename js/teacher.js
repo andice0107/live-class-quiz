@@ -95,7 +95,8 @@ function renderTypeRows() {
 }
 
 function readSettings() {
-  const s = { counts: {}, times: {}, unlimited: {}, repeat: document.querySelector('input[name=repeat]:checked').value };
+  const s = { counts: {}, times: {}, unlimited: {}, repeat: document.querySelector('input[name=repeat]:checked').value,
+    order: document.querySelector('input[name=order]:checked')?.value || 'random' };
   for (const tr of $$('#typeRows tr[data-type]')) {
     const t = tr.dataset.type;
     s.counts[t] = Math.max(0, Number($('.cnt', tr).value) || 0);
@@ -154,6 +155,8 @@ function drawRound(settings) {
     }
     for (const it of chosen) if (!pickedIds.has(it.id)) { pickedIds.add(it.id); picked.push(it); }
   }
+  // 亂序：所有抽到的題目一起打亂，不分題型；依序：照題庫檔裡的順序
+  if (settings.order === 'sequential') return picked.sort((x, y) => S.items.indexOf(x) - S.items.indexOf(y));
   return shuffle(picked);
 }
 
