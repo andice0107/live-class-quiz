@@ -110,19 +110,23 @@ function render(force = false) {
 // ---------- 改錯字：部首意義提示 ----------
 
 // 老師開放時，題目下方顯示每個正確字的部首「意義」（不顯示部首本身）
+// 一個錯字：提示框在田字格左邊；兩個錯字：左右各一個；更多時左右平分
 function syncRadical() {
-  const box = $('#radicalHint');
-  if (!box) return;
+  const L = $('.radical-side.left'), Rt = $('.radical-side.right');
+  if (!L || !Rt) return;
   const c = S.cur;
   const { key } = c && c.phase === 'answering' && c.q ? curQ() : {};
   const r = c?.radical;
   const raw = r && r.on && r.data ? r.data[key] : null;
   const list = raw ? (Array.isArray(raw) ? raw : Object.values(raw)) : [];
-  const html = list.some(Boolean)
-    ? `<div class="reveal-label">💡 部首提示</div><ul>${list.map((m, i) => (m ? `<li>${list.length > 1 ? `第 ${i + 1} 個字的部首` : '正確的字，部首'}${esc(m)}</li>` : '')).join('')}</ul>`
-    : '';
-  if (box.innerHTML !== html) box.innerHTML = html;
-  box.classList.toggle('hidden', !html);
+  const item = (m, i) => (m ? `<div class="radical-item"><div class="radical-title">💡 ${list.length > 1 ? `第 ${i + 1} 個字` : '提示'}</div>部首${esc(m)}</div>` : '');
+  const half = Math.ceil(list.length / 2);
+  const left = list.some(Boolean) ? list.slice(0, half).map((m, i) => item(m, i)).join('') : '';
+  const right = list.some(Boolean) ? list.slice(half).map((m, i) => item(m, i + half)).join('') : '';
+  for (const [box, html] of [[L, left], [Rt, right]]) {
+    if (box.innerHTML !== html) box.innerHTML = html;
+    box.classList.toggle('hidden', !html);
+  }
 }
 
 // ---------- 部件提示 ----------
@@ -236,19 +240,21 @@ function renderQuestion() {
   if (input === 'draw') {
     const chooser = q.type === 'word' && !q.cells
       ? `<div class="cell-count"><span>這個詞有幾個字？</span>${[2, 3, 4].map(n => `<button data-n="${n}" class="${d.n === n ? 'on' : ''}">${n} 格</button>`).join('')}</div>` : '';
-    answerArea = `<div class="draw-area">${chooser}<div id="cells"></div></div>`;
+    // 改錯字的部首提示放在田字格左右兩邊，不壓到田字格的高度
+    const side = q.type === 'correction' ? '<div class="radical-side left hidden"></div>' : '';
+    const side2 = q.type === 'correction' ? '<div class="radical-side right hidden"></div>' : '';
+    answerArea = `<div class="draw-area">${chooser}<div class="cells-row">${side}<div id="cells"></div>${side2}</div></div>`;
   } else if (input === 'text') {
     answerArea = `<textarea id="txt" class="s-text" placeholder="在這裡打字作答">${esc(d.v || '')}</textarea>`;
   } else {
     answerArea = `<div class="s-options">${optionsHtml(q, { selected: d.v, clickable: true })}</div>`;
   }
   const sendLabel = input === 'choice' ? '確認送出' : '送出';
-  app.className = `s-app answering ${group ? 'is-group' : ''} input-${input}`;
+  app.className = `s-app answering ${group ? 'is-group' : ''} input-${input} q-${q.type}`;
   app.innerHTML = `${header()}
     <section class="s-question">
       ${group ? `<details class="s-passage" open><summary>題組文章（點一下收合）</summary>${passageHtml(group)}</details>` : ''}
       ${questionHtml(q, { label: group ? `第 ${S.sub + 1} 小題` : '' })}
-      <div id="radicalHint" class="radical-hint hidden"></div>
     </section>
     <section class="s-answer">${answerArea}<button id="selfMaskCover" class="self-mask-cover">🙈 答案已遮住<br><span>點這裡打開，繼續作答</span></button></section>
     <div id="penOff" class="pen-off hidden">老師暫停了作答，請看老師的說明</div>
@@ -401,6 +407,7 @@ function tick() {
   const c = S.cur;
   if (!el || !c) return;
   if (c.phase !== 'answering') { el.textContent = ''; return; }
+  if (c.pausedLeft !== null && c.pausedLeft !== undefined) { el.textContent = '⏸ ' + fmtTime(c.pausedLeft / 1000); el.className = 's-timer paused'; updateSendState(); return; }
   if (!c.endsAt) { el.textContent = '不限時'; el.className = 's-timer'; return; }
   const left = (c.endsAt - S.db.now()) / 1000;
   el.textContent = fmtTime(left);

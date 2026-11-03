@@ -249,3 +249,18 @@ button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--
   .join-panel { top: .8em; left: auto; right: 11em; }
   .score-panel { right: 10.5em; }
 }
+
+/* 最後 10 秒：紅色並跳動；暫停時顯示剩餘時間 */
+.timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+.timer.paused { color: var(--warn); }
+@keyframes urgent-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+
+/* 讀題：題目、選項、題組文章各自的 🔊 */
+.speak-btn { font-size: .7em; padding: .05em .35em; margin-right: .3em; vertical-align: .15em; line-height: 1.2; }
+.option .speak-btn { font-size: .8em; margin-right: 0; flex: none; }
+.speak-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+/* 設定頁：只指定總題數 */
+.total-row { display: grid; gap: .4em; margin-top: .8em; }
+.total-row input[type=radio] { width: 1.2em; height: 1.2em; vertical-align: -.15em; }
+.total-row input[type=number] { width: 5em; }

@@ -3,7 +3,7 @@ import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, 
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
 import { renderSummary, computeScores, showQuestion } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
-import { THEMES, applyTheme, savedTheme, saveTheme } from './theme.js';
+import { THEMES, applyTheme, saveTheme } from './theme.js';
 import { questionHints, hintCardsHtml } from './hints.js';
 import { radicalOf } from './radicals.js';
 
@@ -32,7 +32,7 @@ const S = {
   // 文字縮放：q 題目、a 答案、s 學生作答（1 = 自動調到剛好放得下）
   fs: { q: 1, a: 1, s: 1, ...JSON.parse(localStorage.getItem(FS_KEY) || '{}') },
   collab: null,         // 正在協助的學生手寫板
-  theme: savedTheme(),
+  theme: 'dark',        // 每次打開都從護眼模式開始
   unsub: [],
   rounds: [],
   round: null,
@@ -103,6 +103,10 @@ function renderTypeRows() {
 function readSettings() {
   const s = { counts: {}, times: {}, unlimited: {}, repeat: document.querySelector('input[name=repeat]:checked').value,
     order: document.querySelector('input[name=order]:checked')?.value || 'random' };
+  // 只指定總題數：不分題型，從整個題庫抽
+  if (document.querySelector('input[name=countMode]:checked')?.value === 'total') {
+    s.total = Math.min(S.items.length, Math.max(0, Math.round(Number($('#totalCount').value) || 0)));
+  }
   for (const tr of $$('#typeRows tr[data-type]')) {
     const t = tr.dataset.type;
     s.counts[t] = Math.max(0, Number($('.cnt', tr).value) || 0);
@@ -114,7 +118,12 @@ function readSettings() {
 
 function updateDrawInfo() {
   const s = readSettings();
-  const n = Object.values(s.counts).reduce((a, b) => a + b, 0);
+  const byTotal = s.total !== undefined;
+  $('#totalCount').disabled = !byTotal;
+  $('#totalCount').max = S.items.length;
+  $('#totalMax').textContent = S.items.length;
+  for (const el of $$('#typeRows .cnt')) el.disabled = byTotal;
+  const n = byTotal ? s.total : Object.values(s.counts).reduce((a, b) => a + b, 0);
   $('#drawInfo').textContent = n ? `這次會抽 ${n} 題` : '';
   $('#startBtn').disabled = !n;
   $('#startBtn').textContent = S.room ? '抽下一份題組' : '建立教室並抽題';
@@ -140,10 +149,22 @@ function questionPreviewHtml(q, label) {
 
 // ---------- 抽題 ----------
 
+// 從一堆題目裡抽 n 題；「出過的先不再出」時先抽沒出過的，不夠才重新開始一輪
+function pickFrom(list, n, settings) {
+  if (settings.repeat === 'repeat') return shuffle(list).slice(0, n);
+  const chosen = shuffle(list.filter(it => !S.used.has(it.id))).slice(0, n);
+  if (chosen.length < n) {
+    for (const it of list) S.used.delete(it.id);
+    chosen.push(...shuffle(list.filter(it => !chosen.includes(it))).slice(0, n - chosen.length));
+  }
+  return chosen;
+}
+
 function drawRound(settings) {
   const picked = [];
   const pickedIds = new Set();
-  for (const [t, n] of Object.entries(settings.counts)) {
+  if (settings.total !== undefined) picked.push(...pickFrom(S.items, settings.total, settings));
+  else for (const [t, n] of Object.entries(settings.counts)) {
     if (!n) continue;
     const ofType = S.items.filter(it => it.type === t);
     let chosen = [];
@@ -272,6 +293,7 @@ function fillThemeSelects() {
 function current() { return S.round && S.round.steps[S.round.idx]; }
 let phase = 'idle';   // idle | answering | revealed | finished
 let endsAt = null;
+let pausedLeft = null; // 全班暫停作答時，倒數剩下的毫秒數
 
 async function startStep(i) {
   const r = S.round;
@@ -280,6 +302,7 @@ async function startStep(i) {
   const secs = stepTime(step);
   const now = S.db.now();
   endsAt = secs ? now + secs * 1000 : null;
+  pausedLeft = null;
   phase = 'answering';
   S.subTab = 'follow';
   S.showAnswer = false;
@@ -309,7 +332,7 @@ async function startStep(i) {
   await S.db.set(`rooms/${S.room}/pen`, S.pen);
   await S.db.set(`rooms/${S.room}/current`, {
     no: i + 1, total: r.steps.length, round: r.no,
-    keys: step.keys, q: publicItem(step.item), phase, startedAt: now, endsAt,
+    keys: step.keys, q: publicItem(step.item), phase, startedAt: now, endsAt, pausedLeft: null,
   });
   renderRun();
 }
@@ -329,7 +352,8 @@ async function endStep() {
   S.guide = true;
   S.hintOn = false;
   S.radicalOn = false;
-  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, hint: null, radical: null, endsAt: null, endedAt: S.db.now() });
+  pausedLeft = null;
+  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, hint: null, radical: null, endsAt: null, pausedLeft: null, endedAt: S.db.now() });
   const guides = step.keys.flatMap(k => guideChars(S.round.questions[k].q.type, answerText(S.round.questions[k].q)));
   if (guides.length) ensureKai(guides).then(() => { tileSigs = new WeakMap(); renderGrid(); });
   renderRun();
@@ -432,7 +456,7 @@ function renderRun() {
   renderPenAll();
   renderHintBtn();
   renderRadicalBtn();
-  for (const b of $$('#extendBox button')) b.disabled = !(answering && endsAt);
+  for (const b of $$('#extendBox button')) b.disabled = !(answering && (endsAt || pausedLeft !== null));
   $('#readBtn').disabled = !step;
   $('#scoreBtn').disabled = r.idx < 0 && !S.scoreOpen;
   $('#reviewBtn').disabled = !reviewKeys().length;
@@ -454,6 +478,7 @@ function renderNextBtn() {
 function renderTimer() {
   const el = $('#timer');
   if (phase !== 'answering') { el.textContent = phase === 'revealed' ? '已結束' : '--:--'; el.className = 'timer'; return; }
+  if (pausedLeft !== null) { el.textContent = '⏸ ' + fmtTime(pausedLeft / 1000); el.className = 'timer paused'; return; }
   if (!endsAt) { el.textContent = '不限時'; el.className = 'timer'; return; }
   const left = (endsAt - S.db.now()) / 1000;
   el.textContent = fmtTime(left);
@@ -481,6 +506,7 @@ function renderQPanel() {
   const scroll = p.querySelector('.q-scroll');
   const keep = scroll ? scroll.scrollTop : 0;
   p.innerHTML = html;
+  addSpeakButtons(step);
   fitQPanel();
   const ns = p.querySelector('.q-scroll');
   if (ns) ns.scrollTop = keep;
@@ -923,45 +949,89 @@ function radicalPreviewHtml(step) {
 
 // ---------- 讀題 ----------
 
-function speakText(step) {
-  const clean = t => String(t || '').replace(/[（(]\s*[）)]/g, '，空格，').replace(/[　_＿]{2,}/g, '，空格，');
-  const one = q => {
-    let t = clean(q.prompt);
-    if (q.type === 'choice') t += '。' + q.options.map((o, i) => `${letter(i)}，${clean(o.text) || '圖片'}`).join('。');
-    return t;
-  };
-  const it = step.item;
-  if (it.type !== 'group') return one(it);
-  const subs = typeof S.subTab === 'number' ? [it.subs[S.subTab]] : it.subs;
-  const head = typeof S.subTab === 'number' ? '' : `${clean(it.title)}。${clean(it.passage)}。`;
-  return head + subs.map((q, j) => `第${typeof S.subTab === 'number' ? S.subTab + 1 : j + 1}小題。${one(q)}`).join('。');
+const speakClean = t => String(t || '').replace(/[（(]\s*[）)]/g, '，空格，').replace(/[　_＿]{2,}/g, '，空格，');
+
+// 要唸的文字：data-speak="p|k"（題目）、"o|k|i"（選項）、"g"（題組文章）
+function speakTextOf(spec) {
+  const step = current();
+  if (!step) return '';
+  const [kind, k, i] = spec.split('|');
+  if (kind === 'g') return `${speakClean(step.item.title)}。${speakClean(step.item.passage)}`;
+  const q = S.round.questions[k]?.q;
+  if (!q) return '';
+  if (kind === 'o') return `${letter(Number(i))}，${speakClean(q.options[Number(i)].text) || '圖片'}`;
+  return speakClean(q.prompt);
 }
 
-function readQuestion() {
+// 功能列的「讀題」只唸題目（題組時唸目前看的那一小題），選項用各自的 🔊
+function toolbarSpeakSpec() {
+  const step = current();
+  if (!step) return '';
+  const k = typeof S.subTab === 'number' ? step.keys[S.subTab] : step.keys[0];
+  return `p|${k}`;
+}
+
+function readQuestion(spec = toolbarSpeakSpec(), btn = $('#readBtn')) {
   const synth = window.speechSynthesis;
   if (!synth) { alert('這台電腦的瀏覽器不支援朗讀。'); return; }
-  if (synth.speaking) { stopReading(); return; }
-  const step = current();
-  if (!step) return;
-  const u = new SpeechSynthesisUtterance(speakText(step));
+  const same = S.speaking === spec;
+  stopReading();
+  if (same) return;
+  const text = speakTextOf(spec);
+  if (!text) return;
+  S.speaking = spec;
+  const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-TW';
   const voice = synth.getVoices().find(v => /zh[-_]TW/i.test(v.lang)) || synth.getVoices().find(v => /^zh/i.test(v.lang));
   if (voice) u.voice = voice;
   u.rate = 0.9;
-  u.onend = u.onerror = () => renderReadBtn(false);
+  u.onend = u.onerror = () => { if (S.speaking === spec) { S.speaking = null; renderReadBtns(); } };
   synth.speak(u);
-  renderReadBtn(true);
+  renderReadBtns();
 }
 
 function stopReading() {
+  S.speaking = null;
   if (window.speechSynthesis) speechSynthesis.cancel();
-  renderReadBtn(false);
+  renderReadBtns();
 }
 
-function renderReadBtn(on) {
+// 正在唸的那個鍵變成「停止」
+function renderReadBtns() {
   const b = $('#readBtn');
-  b.textContent = on ? '⏹ 停止朗讀' : '🔊 讀題';
-  b.classList.toggle('primary', on);
+  const tb = S.speaking && S.speaking === toolbarSpeakSpec();
+  b.textContent = tb ? '⏹ 停止' : '🔊 讀題';
+  b.classList.toggle('primary', !!tb);
+  for (const x of $$('#qPanel [data-speak]')) {
+    const on = x.dataset.speak === S.speaking;
+    x.classList.toggle('on', on);
+    x.textContent = on ? '⏹' : '🔊';
+  }
+}
+
+// 題目區每個題目、選項、題組文章前面加一個 🔊
+function addSpeakButtons(step) {
+  const box = $('#qPanel .q-scroll');
+  if (!box) return;
+  const mk = spec => {
+    const b = document.createElement('button');
+    b.className = 'speak-btn';
+    b.dataset.speak = spec;
+    b.title = '唸出來';
+    b.textContent = '🔊';
+    return b;
+  };
+  const passage = box.querySelector('.passage');
+  if (passage && step.item.type === 'group') passage.prepend(mk('g'));
+  const blocks = step.item.type === 'group' ? $$('.sub-q', box) : [box];
+  blocks.forEach((el, j) => {
+    const k = step.keys[j];
+    if (!k) return;
+    const p = el.querySelector('.q-prompt');
+    if (p) p.prepend(mk(`p|${k}`));
+    $$('.option', el).forEach((o, i) => o.prepend(mk(`o|${k}|${i}`)));
+  });
+  renderReadBtns();
 }
 
 // ---------- 確認視窗 ----------
@@ -1106,6 +1176,8 @@ function bind() {
     renderBankInfo();
   });
   $('#previewBtn').addEventListener('click', previewAll);
+  for (const r of $$('input[name=countMode]')) r.addEventListener('change', updateDrawInfo);
+  $('#totalCount').addEventListener('input', updateDrawInfo);
   $('#typeRows').addEventListener('input', e => {
     if (e.target.classList.contains('unl')) e.target.closest('tr').querySelector('.time').disabled = e.target.checked;
     updateDrawInfo();
@@ -1135,9 +1207,22 @@ function bind() {
   });
   $('#joinPanel').addEventListener('click', e => { if (!e.target.closest('select, label')) $('#joinToggle').click(); });
   $('#nextBtn').addEventListener('click', next);
-  $('#penAllBtn').addEventListener('click', () => {
+  $('#penAllBtn').addEventListener('click', async () => {
     S.pen = { all: !S.pen.all, by: {} };
     S.db.set(`rooms/${S.room}/pen`, S.pen);
+    // 有倒數的題目：暫停作答時倒數也停住，開放作答時從剩下的時間繼續
+    if (phase === 'answering') {
+      if (!S.pen.all && endsAt) {
+        pausedLeft = Math.max(0, endsAt - S.db.now());
+        endsAt = null;
+        await S.db.update(`rooms/${S.room}/current`, { endsAt: null, pausedLeft });
+      } else if (S.pen.all && pausedLeft !== null) {
+        endsAt = S.db.now() + pausedLeft;
+        pausedLeft = null;
+        await S.db.update(`rooms/${S.room}/current`, { endsAt, pausedLeft: null });
+      }
+      renderRun();
+    }
     renderPenAll();
     renderGrid();
   });
@@ -1148,15 +1233,21 @@ function bind() {
   });
   $('#hintBtn').addEventListener('click', toggleHints);
   $('#radicalBtn').addEventListener('click', toggleRadical);
-  $('#readBtn').addEventListener('click', readQuestion);
+  $('#readBtn').addEventListener('click', () => readQuestion());
   $('#scoreBtn').addEventListener('click', () => { S.scoreOpen = !S.scoreOpen; renderScorePanel(); });
   $('#scorePanel').addEventListener('click', e => { if (e.target.closest('[data-close]')) { S.scoreOpen = false; renderScorePanel(); } });
   $('#reviewBtn').addEventListener('click', openReview);
   $('#extendBox').addEventListener('click', async e => {
     const add = Number(e.target.dataset.add);
-    if (!add || phase !== 'answering' || !endsAt) return;
-    endsAt += add * 1000;
-    await S.db.update(`rooms/${S.room}/current`, { endsAt });
+    if (!add || phase !== 'answering') return;
+    if (pausedLeft !== null) {
+      pausedLeft += add * 1000;
+      await S.db.update(`rooms/${S.room}/current`, { pausedLeft });
+    } else {
+      if (!endsAt) return;
+      endsAt += add * 1000;
+      await S.db.update(`rooms/${S.room}/current`, { endsAt });
+    }
     renderTimer();
   });
   $('#earlyEnd').addEventListener('click', async () => {
@@ -1191,6 +1282,8 @@ function bind() {
   $('#qPanel').addEventListener('click', e => {
     const fs = e.target.closest('[data-fs]');
     if (fs) { changeFont(fs.dataset.fs, Number(fs.dataset.d)); return; }
+    const sp = e.target.closest('[data-speak]');
+    if (sp) { readQuestion(sp.dataset.speak); return; }
     if (e.target.id === 'peekBtn') { S.showAnswer = !S.showAnswer; renderQPanel(); return; }
     if (e.target.id === 'guideBtn') {
       S.guide = !S.guide;

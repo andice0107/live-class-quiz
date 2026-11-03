@@ -66,6 +66,18 @@
 .self-mask-btn { white-space: nowrap; }
 .self-masked .self-mask-btn { background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn); }
 
-/* 改錯字的部首意義提示 */
-.radical-hint { margin-top: .4em; padding: .4em .8em; border-radius: 10px; background: var(--sel-bg); border: 1px solid var(--warn); font-size: 1.35rem; }
-.radical-hint ul { margin: .2em 0; padding-left: 1.3em; }
+/* 改錯字的部首意義提示：放在田字格左右兩邊 */
+.cells-row { flex: 1; min-height: 0; display: flex; gap: .6em; align-items: center; }
+.cells-row #cells { flex: 1; min-width: 0; height: 100%; }
+.radical-side { flex: none; width: clamp(9em, 22%, 15em); display: grid; gap: .6em; align-content: center; }
+.radical-item { padding: .6em .8em; border-radius: 12px; background: var(--sel-bg); border: 2px solid var(--warn); font-size: 1.35rem; line-height: 1.45; }
+.radical-title { font-weight: 800; color: var(--warn-ink); margin-bottom: .2em; }
+
+/* 倒數時間：放大；最後 10 秒紅色並跳動 */
+.s-timer { font-size: 3rem; line-height: 1; }
+.s-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+.s-timer.paused { color: var(--warn); }
+@keyframes urgent-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+
+/* 寫國字、寫注音的題目字放大 */
+.q-hanzi .s-question .q-prompt, .q-zhuyin .s-question .q-prompt { font-size: 2.6rem; line-height: 1.5; }

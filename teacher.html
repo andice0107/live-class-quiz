@@ -39,6 +39,11 @@
         <thead><tr><th>題型</th><th>題庫裡有</th><th>還沒出過</th><th>這次出幾題</th><th>作答時間（秒）</th><th>無限時</th></tr></thead>
         <tbody id="typeRows"><tr><td colspan="6" class="muted">載入題庫後會出現。</td></tr></tbody>
       </table>
+      <div class="total-row">
+        <label><input type="radio" name="countMode" value="type" checked> 依題型指定題數（上表「這次出幾題」）</label>
+        <label><input type="radio" name="countMode" value="total"> 只指定總題數：這次一共出
+          <input id="totalCount" type="number" min="1" value="10" disabled> 題，工具自動從題庫裡隨機抓（最多 <span id="totalMax">0</span> 題）</label>
+      </div>
       <p class="muted small">題組算一題抽出，抽中後整組一起考，組內小題照原本順序；計分時每個小題各算一題。</p>
       <div class="radio-group">
         <label><input type="radio" name="repeat" value="norepeat" checked> 出過的題目先不再出，等全部題目都出過才重新開始</label>
