@@ -3,6 +3,16 @@ import { TYPES, answerText, questionHtml, passageHtml, optionsHtml, letter } fro
 import { $, esc, textHtml, showModal } from './util.js';
 import { paintInkThumb, useGrid, guideChars, ensureKai } from './ink.js';
 
+// 一題的得分：全對 1、全錯 0、手寫題部分對是 0～1 之間的小數、還沒批改是 null
+export const credit = m => (m === true ? 1 : m === false ? 0 : typeof m === 'number' ? m : null);
+// 顯示分數用：整數照原樣，有小數時留一位
+export const fmtNum = x => (Number.isInteger(x) ? String(x) : x.toFixed(1));
+// 部分對的格子：「2/3」表示 3 個字對 2 個
+export function partLabel(Q, sid) {
+  const cm = Q.cellMarks?.[sid];
+  return cm ? `${cm.filter(x => x === true).length}/${cm.length}` : `${Math.round(credit(Q.marks[sid]) * 100)}%`;
+}
+
 export function computeScores(S, r) {
   const out = {};
   for (const sid of Object.keys(S.students)) {
@@ -11,9 +21,9 @@ export function computeScores(S, r) {
       const Q = r.questions[k];
       if (!Q.participants.includes(sid)) continue;
       total++;
-      if (Q.marks[sid] === true) correct++;
+      correct += credit(Q.marks[sid]) || 0;
     }
-    out[sid] = { correct, total, score: total ? Math.round(correct / total * 100) : 0 };
+    out[sid] = { correct: Math.round(correct * 10) / 10, total, score: total ? Math.round(correct / total * 100) : 0 };
   }
   return out;
 }
@@ -25,7 +35,7 @@ export function questionStats(S, r, k) {
   const ans = S.answers[k] || {};
   let right = 0, blank = 0, secs = 0, timed = 0;
   for (const sid of Q.participants) {
-    if (Q.marks[sid] === true) right++;
+    right += credit(Q.marks[sid]) || 0;
     const a = ans[sid];
     if (!a || a.v === undefined || a.v === null || a.v === '') blank++;
     else if (a.at && step.startedAt) { secs += (a.at - step.startedAt) / 1000; timed++; }
@@ -34,6 +44,7 @@ export function questionStats(S, r, k) {
   return {
     n, right, blank,
     rate: n ? Math.round(right / n * 100) : null,
+    right: Math.round(right * 10) / 10,
     avgSec: timed ? Math.round(secs / timed) : null,
   };
 }
@@ -76,7 +87,7 @@ export function renderSummary(S, { onToggle, onNextRound }) {
       <div class="table-wrap">
         <table class="score-table">
           <thead><tr><th>學生</th><th>分數</th><th>答對</th>${keys.map(k => `<th><button class="link" data-q="${k}" title="看完整題目">${r.questions[k].label}</button><div class="small muted">${TYPES[r.questions[k].q.type].label}</div></th>`).join('')}</tr></thead>
-          <tbody>${sids.map(sid => `<tr><th>${esc(sid)}</th><td class="score">${scores[sid].score}</td><td>${scores[sid].correct}/${scores[sid].total}</td>${keys.map(k => cellHtml(r.questions[k], sid)).join('')}</tr>`).join('')}</tbody>
+          <tbody>${sids.map(sid => `<tr><th>${esc(sid)}</th><td class="score">${scores[sid].score}</td><td>${fmtNum(scores[sid].correct)}/${scores[sid].total}</td>${keys.map(k => cellHtml(r.questions[k], sid)).join('')}</tr>`).join('')}</tbody>
           <tfoot>
             <tr><th>答對率</th><td></td><td></td>${keys.map(k => `<td>${stats[k].rate ?? '-'}%</td>`).join('')}</tr>
             <tr><th>平均秒數</th><td></td><td></td>${keys.map(k => `<td>${stats[k].avgSec ?? '-'}</td>`).join('')}</tr>
@@ -95,6 +106,7 @@ export function renderSummary(S, { onToggle, onNextRound }) {
       const Q = r.questions[cell.dataset.k];
       const sid = cell.dataset.sid;
       Q.marks[sid] = Q.marks[sid] !== true;
+      if (Q.cellMarks) delete Q.cellMarks[sid];
       draw();
       await onToggle();
       return;
@@ -108,8 +120,9 @@ export function renderSummary(S, { onToggle, onNextRound }) {
 function cellHtml(Q, sid) {
   if (!Q.participants.includes(sid)) return '<td class="na">—</td>';
   const m = Q.marks[sid];
-  const cls = m === true ? 'ok' : m === false ? 'no' : 'pend';
-  const sym = m === true ? '○' : m === false ? '✕' : '？';
+  const part = typeof m === 'number';
+  const cls = m === true ? 'ok' : m === false ? 'no' : part ? 'part' : 'pend';
+  const sym = m === true ? '○' : m === false ? '✕' : part ? `△${partLabel(Q, sid)}` : '？';
   const hint = (Q.hintUsed || []).includes(sid) ? '<span class="hint-mark" title="看過部件提示">💡</span>' : '';
   return `<td class="cell ${cls}" data-k="${Q.key}" data-sid="${esc(sid)}">${sym}${hint}</td>`;
 }
@@ -130,7 +143,7 @@ export function showQuestion(S, r, k) {
       else if (input === 'choice') body = `<b>${letter(a.v)}</b>${a.submitted ? '' : ' <span class="muted small">（沒按確認）</span>'}`;
       else body = textHtml(a.v);
     }
-    return `<div class="ans-card ${m === true ? 'ok' : m === false ? 'no' : ''}"><div class="ans-sid">${esc(sid)} ${m === true ? '○' : m === false ? '✕' : '？'}</div><div class="ans-body">${body}</div></div>`;
+    return `<div class="ans-card ${m === true ? 'ok' : m === false ? 'no' : typeof m === 'number' ? 'part' : ''}"><div class="ans-sid">${esc(sid)} ${m === true ? '○' : m === false ? '✕' : typeof m === 'number' ? `△ ${partLabel(Q, sid)}` : '？'}</div><div class="ans-body">${body}</div></div>`;
   }).join('');
   const modal = showModal(`
     ${step.item.type === 'group' ? `<details class="passage-box"><summary>題組文章</summary>${passageHtml(step.item)}</details>` : ''}
@@ -156,7 +169,8 @@ function exportXlsx(S, r) {
     const Q = r.questions[k];
     if (!Q.participants.includes(sid)) return '—';
     const hint = (Q.hintUsed || []).includes(sid) ? '（看提示）' : '';
-    return (Q.marks[sid] === true ? '○' : Q.marks[sid] === false ? '✕' : '未批改') + hint;
+    const m = Q.marks[sid];
+    return (m === true ? '○' : m === false ? '✕' : typeof m === 'number' ? `部分對 ${partLabel(Q, sid)}` : '未批改') + hint;
   })]);
   const statRows = [
     ['答對率(%)', '', '', '', ...keys.map(k => questionStats(S, r, k).rate ?? '')],

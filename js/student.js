@@ -483,7 +483,7 @@ function renderFinal() {
   const s = S.score;
   app.className = 's-app';
   app.innerHTML = `${header()}<main class="s-final">
-    ${s ? `<div class="muted">這次的分數</div><div class="final-score">${s.score}</div><div class="final-detail">答對 ${s.correct} / ${s.total} 題</div>`
+    ${s ? `<div class="muted">這次的分數</div><div class="final-score">${s.score}</div><div class="final-detail">答對 ${Number.isInteger(s.correct) ? s.correct : s.correct.toFixed(1)} / ${s.total} 題</div>`
         : '<div>老師正在計算分數…</div>'}</main>`;
 }
 

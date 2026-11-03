@@ -264,3 +264,20 @@ button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--
 .total-row { display: grid; gap: .4em; margin-top: .8em; }
 .total-row input[type=radio] { width: 1.2em; height: 1.2em; vertical-align: -.15em; }
 .total-row input[type=number] { width: 5em; }
+
+/* 手寫題每個字的對錯鍵 */
+.cell-marks { flex: 1; display: flex; flex-wrap: wrap; align-items: stretch; gap: 2px; padding: 2px; }
+.cm { flex: 1 1 0; min-width: 3.6em; display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.cm-n { display: grid; place-items: center; padding: 0 .3em; font-size: .8rem; font-weight: 800; color: var(--muted); background: var(--panel-2); }
+.cm button { flex: 1; border-radius: 0; border: 0; padding: .25em 0; font-size: 1rem; }
+.cm button[data-cmark="1"].on { background: var(--ok-bg); color: var(--good); }
+.cm button[data-cmark="0"].on { background: var(--bad-bg); color: var(--bad); }
+.cm-sum { align-self: center; padding: 0 .4em; font-weight: 800; color: var(--warn); }
+.tile.partial { border-color: var(--warn); }
+.score-table td.part { color: var(--warn); background: var(--sel-bg); }
+.ans-card.part { border-color: var(--warn); }
+.dot.part { color: var(--warn); }
+
+/* 語音選單 */
+.voice-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5em; }
+.voice-select { max-width: 22em; }

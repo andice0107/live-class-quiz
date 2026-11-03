@@ -1,7 +1,7 @@
 import { openDb } from './db.js';
 import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
-import { renderSummary, computeScores, showQuestion } from './report.js';
+import { renderSummary, computeScores, showQuestion, credit, fmtNum, partLabel } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { THEMES, applyTheme, saveTheme } from './theme.js';
 import { questionHints, hintCardsHtml } from './hints.js';
@@ -9,6 +9,7 @@ import { radicalOf } from './radicals.js';
 
 const USED_KEY = 'lcq-used';
 const FS_KEY = 'lcq-font-scale';
+const VOICE_KEY = 'lcq-voice';
 
 const S = {
   db: null,
@@ -198,13 +199,13 @@ function newRound(settings) {
       item.subs.forEach((q, j) => {
         const key = `${base}q${j + 1}`;
         step.keys.push(key);
-        round.questions[key] = { key, q, label: `${i + 1}-${j + 1}`, step: i, marks: {}, participants: [] };
+        round.questions[key] = { key, q, label: `${i + 1}-${j + 1}`, step: i, marks: {}, cellMarks: {}, participants: [] };
         round.order.push(key);
       });
     } else {
       const key = `${base}q1`;
       step.keys.push(key);
-      round.questions[key] = { key, q: item, label: `${i + 1}`, step: i, marks: {}, participants: [] };
+      round.questions[key] = { key, q: item, label: `${i + 1}`, step: i, marks: {}, cellMarks: {}, participants: [] };
       round.order.push(key);
     }
     round.steps.push(step);
@@ -274,8 +275,56 @@ function qrSvg(text) {
 
 function renderJoinPanel() {
   $('#joinPanel').innerHTML = `${joinBlockHtml(false)}
-    <div class="row join-theme"><label>畫面主題 <select class="theme-select"></select></label><span class="spacer"></span><span class="muted small">點空白處收合</span></div>`;
+    <div class="row join-theme"><label>畫面主題 <select class="theme-select"></select></label></div>
+    <div class="row join-theme voice-row"><label>讀題語音 <select class="voice-select"></select></label><button class="voice-test" type="button">試聽</button>
+      <span class="spacer"></span><span class="muted small">點空白處收合</span></div>`;
   fillThemeSelects();
+  fillVoiceSelects();
+}
+
+// ---------- 讀題語音 ----------
+
+// 中文語音，臺灣國語排最前面；Google 國語（臺灣）只有 Chrome 瀏覽器才有
+function zhVoices() {
+  const all = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  const rank = v => (/zh[-_]TW/i.test(v.lang) ? 0 : /zh[-_]HK/i.test(v.lang) ? 2 : 1) * 2 + (/google/i.test(v.name) ? 0 : 1);
+  return all.filter(v => /^zh|^cmn/i.test(v.lang)).sort((a, b) => rank(a) - rank(b));
+}
+
+function savedVoiceName() {
+  try { return localStorage.getItem(VOICE_KEY) || ''; } catch { return ''; }
+}
+
+// 老師選的語音；沒選過時預設 Google 國語（臺灣），沒有的話用第一個臺灣國語語音
+function currentVoice() {
+  const list = zhVoices();
+  return list.find(v => v.name === savedVoiceName())
+    || list.find(v => /google/i.test(v.name) && /zh[-_]TW/i.test(v.lang))
+    || list[0] || null;
+}
+
+function voiceLabel(v) {
+  const where = /zh[-_]TW/i.test(v.lang) ? '臺灣' : /zh[-_]HK/i.test(v.lang) ? '香港' : /zh[-_]CN/i.test(v.lang) ? '中國' : v.lang;
+  return `${v.name}（${where}）`;
+}
+
+function fillVoiceSelects() {
+  const list = zhVoices();
+  const cur = currentVoice();
+  const html = list.length
+    ? list.map(v => `<option value="${esc(v.name)}">${esc(voiceLabel(v))}</option>`).join('')
+    : '<option value="">這台電腦找不到中文語音</option>';
+  for (const sel of $$('.voice-select')) {
+    sel.innerHTML = html;
+    sel.value = cur ? cur.name : '';
+    if (!sel.dataset.bound) {
+      sel.dataset.bound = '1';
+      sel.addEventListener('change', () => {
+        try { localStorage.setItem(VOICE_KEY, sel.value); } catch { /* 存不了沒關係 */ }
+        fillVoiceSelects();
+      });
+    }
+  }
 }
 
 function fillThemeSelects() {
@@ -753,10 +802,49 @@ function fillTile(el, sid, step) {
   const mark = Q.marks[sid];
   el.classList.toggle('right', mark === true);
   el.classList.toggle('wrong', mark === false);
+  el.classList.toggle('partial', typeof mark === 'number');
   if (phase === 'revealed' && Q.participants.includes(sid)) {
-    markEl.innerHTML = `<button data-mark="1" class="${mark === true ? 'on' : ''}">✓ 對</button><button data-mark="0" class="${mark === false ? 'on' : ''}">✗ 錯</button>`;
+    const n = perCell(Q) ? cellCount(Q, sid) : 1;
+    if (n > 1) {
+      // 手寫題：每個字各自的對錯鍵
+      const cm = cellMarksOf(Q, sid);
+      markEl.innerHTML = `<div class="cell-marks">${cm.map((m, i) => `<div class="cm"><span class="cm-n">${i + 1}</span>
+        <button data-cmark="1" data-i="${i}" class="${m === true ? 'on' : ''}" title="第 ${i + 1} 個字對">✓</button><button data-cmark="0" data-i="${i}" class="${m === false ? 'on' : ''}" title="第 ${i + 1} 個字錯">✗</button></div>`).join('')}
+        ${typeof mark === 'number' ? `<span class="cm-sum">${partLabel(Q, sid)}</span>` : ''}</div>`;
+    } else {
+      markEl.innerHTML = `<button data-mark="1" class="${mark === true ? 'on' : ''}">✓ 對</button><button data-mark="0" class="${mark === false ? 'on' : ''}">✗ 錯</button>`;
+    }
     markEl.dataset.key = k;
   } else markEl.innerHTML = '';
+}
+
+// ---------- 手寫題每個字分開批改 ----------
+
+// 會用到田字格的題型（手寫作答是一整塊手寫板，整題一起批改）
+const perCell = Q => TYPES[Q.q.type].input === 'draw' && Q.q.type !== 'write';
+
+// 這位學生的格數（造詞由學生自己選 2～4 格）
+function cellCount(Q, sid) {
+  const ink = (S.ink[Q.key] || {})[sid];
+  return Math.max(1, (ink && ink.n) || defaultCells(Q.q));
+}
+
+// 每格的對錯；整題已經被標成全對或全錯時，每格跟著顯示
+function cellMarksOf(Q, sid) {
+  const n = cellCount(Q, sid);
+  const m = Q.marks[sid];
+  const cm = Q.cellMarks[sid];
+  return Array.from({ length: n }, (_, i) => (cm && cm[i] !== undefined ? cm[i] : m === true ? true : m === false ? false : undefined));
+}
+
+// 每個字都批改後才算出這一題的分數：全對、全錯，或答對的比例
+function setCellMark(Q, sid, i, v) {
+  const cm = cellMarksOf(Q, sid);
+  cm[i] = v;
+  Q.cellMarks[sid] = cm;
+  if (cm.some(x => x === undefined)) { delete Q.marks[sid]; return; }
+  const right = cm.filter(x => x === true).length;
+  Q.marks[sid] = right === cm.length ? true : right === 0 ? false : right / cm.length;
 }
 
 // ---------- 協助學生的手寫板 ----------
@@ -982,12 +1070,23 @@ function readQuestion(spec = toolbarSpeakSpec(), btn = $('#readBtn')) {
   S.speaking = spec;
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'zh-TW';
-  const voice = synth.getVoices().find(v => /zh[-_]TW/i.test(v.lang)) || synth.getVoices().find(v => /^zh/i.test(v.lang));
-  if (voice) u.voice = voice;
+  const voice = currentVoice();
+  if (voice) { u.voice = voice; u.lang = voice.lang; }
   u.rate = 0.9;
   u.onend = u.onerror = () => { if (S.speaking === spec) { S.speaking = null; renderReadBtns(); } };
   synth.speak(u);
   renderReadBtns();
+}
+
+function speakSample() {
+  if (!window.speechSynthesis) { alert('這台電腦的瀏覽器不支援朗讀。'); return; }
+  stopReading();
+  const u = new SpeechSynthesisUtterance('小朋友，請看第一題。老鷹在天空中飛翔。');
+  const voice = currentVoice();
+  u.lang = 'zh-TW';
+  if (voice) { u.voice = voice; u.lang = voice.lang; }
+  u.rate = 0.9;
+  speechSynthesis.speak(u);
 }
 
 function stopReading() {
@@ -1072,11 +1171,12 @@ function liveScores() {
       const Q = r.questions[k];
       if (!Q.participants.includes(sid)) return { k, m: 'na' };
       asked++;
-      const m = Q.marks[sid];
-      if (m === true) right++; else if (m === false) wrong++; else pend++;
-      return { k, m: m === true ? 'ok' : m === false ? 'no' : 'pend' };
+      const c = credit(Q.marks[sid]);
+      if (c === null) pend++; else { right += c; wrong += 1 - c; }
+      return { k, m: c === null ? 'pend' : c === 1 ? 'ok' : c === 0 ? 'no' : 'part', label: c !== null && c > 0 && c < 1 ? partLabel(Q, sid) : '' };
     });
-    return { sid, right, wrong, pend, asked, score: asked ? Math.round(right / asked * 100) : 0, marks };
+    const score = asked ? Math.round(right / asked * 100) : 0;
+    return { sid, right: Math.round(right * 10) / 10, wrong: Math.round(wrong * 10) / 10, pend, asked, score, marks };
   });
 }
 
@@ -1087,9 +1187,9 @@ function rankingHtml() {
   const rows = list.map((x, i) => {
     if (!prev || x.right !== prev.right || x.wrong !== prev.wrong) rank = i + 1;
     prev = x;
-    return `<tr><td class="rank">${rank}</td><th>${esc(x.sid)}</th><td class="ok">${x.right}</td><td class="no">${x.wrong}</td><td class="score">${x.score}</td></tr>`;
+    return `<tr><td class="rank">${rank}</td><th>${esc(x.sid)}</th><td class="ok">${fmtNum(x.right)}</td><td class="no">${fmtNum(x.wrong)}</td><td class="score">${x.score}</td></tr>`;
   });
-  return `<p class="muted">已出 ${gradedKeys().length} 題，分數＝答對題數 ÷ 已作答題數 × 100</p>
+  return `<p class="muted">已出 ${gradedKeys().length} 題，分數＝答對題數 ÷ 已作答題數 × 100（手寫題部分對的，依答對的字數比例計分）</p>
     <div class="rank-wrap"><table class="rank-table"><thead><tr><th>名次</th><th>學生</th><th>答對</th><th>答錯</th><th>目前分數</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
@@ -1100,9 +1200,9 @@ function renderScorePanel() {
   p.classList.remove('hidden');
   const r = S.round;
   const list = liveScores().sort((a, b) => a.sid.localeCompare(b.sid, 'en', { numeric: true }));
-  const sym = { ok: '○', no: '✕', pend: '？', na: '—' };
-  const rows = list.map(x => `<tr><th>${esc(x.sid)}</th><td class="ok">${x.right}</td><td class="no">${x.wrong}</td><td class="pend">${x.pend || ''}</td>
-    <td class="dots">${x.marks.map(({ k, m }) => `<span class="dot ${m}" title="第 ${esc(r.questions[k].label)} 題">${sym[m]}</span>`).join('')}</td></tr>`);
+  const sym = { ok: '○', no: '✕', pend: '？', na: '—', part: '△' };
+  const rows = list.map(x => `<tr><th>${esc(x.sid)}</th><td class="ok">${fmtNum(x.right)}</td><td class="no">${fmtNum(x.wrong)}</td><td class="pend">${x.pend || ''}</td>
+    <td class="dots">${x.marks.map(({ k, m, label }) => `<span class="dot ${m}" title="第 ${esc(r.questions[k].label)} 題${label ? ` 對 ${label} 字` : ''}">${sym[m]}</span>`).join('')}</td></tr>`);
   p.innerHTML = `<div class="sp-head"><b>即時成績</b><span class="muted small">已公布 ${gradedKeys().length} 題</span><span class="spacer"></span><button data-close title="收合">收合 ▴</button></div>
     <div class="sp-body"><table class="sp-table"><thead><tr><th>學生</th><th>對</th><th>錯</th><th>待批</th><th>每一題</th></tr></thead><tbody>${rows.join('') || '<tr><td colspan="5" class="muted">還沒有學生</td></tr>'}</tbody></table></div>`;
 }
@@ -1119,7 +1219,7 @@ function openReview() {
   if (!keys.length) return;
   const items = keys.map(k => {
     const Q = r.questions[k];
-    const right = Q.participants.filter(sid => Q.marks[sid] === true).length;
+    const right = fmtNum(Math.round(Q.participants.reduce((n, sid) => n + (credit(Q.marks[sid]) || 0), 0) * 10) / 10);
     const text = String(Q.q.prompt || '').replace(/\s+/g, ' ');
     return `<button class="review-item" data-q="${k}"><span class="badge type-badge">第 ${esc(Q.label)} 題．${TYPES[Q.q.type].label}</span>
       <span class="review-text">${esc(text.length > 40 ? text.slice(0, 40) + '…' : text)}</span><span class="muted small">答對 ${right}/${Q.participants.length}</span></button>`;
@@ -1205,7 +1305,7 @@ function bind() {
     p.classList.toggle('hidden');
     $('#joinToggle').textContent = p.classList.contains('hidden') ? '加入資訊 ▾' : '加入資訊 ▴';
   });
-  $('#joinPanel').addEventListener('click', e => { if (!e.target.closest('select, label')) $('#joinToggle').click(); });
+  $('#joinPanel').addEventListener('click', e => { if (!e.target.closest('select, label, button')) $('#joinToggle').click(); });
   $('#nextBtn').addEventListener('click', next);
   $('#penAllBtn').addEventListener('click', async () => {
     S.pen = { all: !S.pen.all, by: {} };
@@ -1227,6 +1327,14 @@ function bind() {
     renderGrid();
   });
   fillThemeSelects();
+  fillVoiceSelects();
+  // 語音清單在部分瀏覽器要等一下才會載入好
+  if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', fillVoiceSelects);
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.voice-test')) return;
+    e.stopPropagation();
+    speakSample();
+  }, true);
   $('#endBtn').addEventListener('click', async () => {
     if (phase !== 'answering') return;
     if (await confirmBox('<h2>要結束這一題的作答嗎？</h2><p>結束後學生就不能再修改，畫面會公布答案。</p>', '確認結束本題作答', { danger: true })) endStep();
@@ -1268,10 +1376,19 @@ function bind() {
       return;
     }
     if (e.target.closest('[data-collab]')) { openCollab(sid); return; }
+    const cbtn = e.target.closest('[data-cmark]');
+    if (cbtn) {
+      const Q = S.round.questions[cbtn.closest('.tile-mark').dataset.key];
+      setCellMark(Q, sid, Number(cbtn.dataset.i), cbtn.dataset.cmark === '1');
+      renderGrid();
+      renderQPanel();
+      return;
+    }
     const btn = e.target.closest('[data-mark]');
     if (btn) {
-      const k = btn.parentElement.dataset.key;
-      S.round.questions[k].marks[sid] = btn.dataset.mark === '1';
+      const Q = S.round.questions[btn.parentElement.dataset.key];
+      Q.marks[sid] = btn.dataset.mark === '1';
+      delete Q.cellMarks[sid];
       renderGrid();
       renderQPanel();
       return;
@@ -1294,7 +1411,12 @@ function bind() {
     if (e.target.id === 'allRight') {
       for (const k of gradeKeys(current())) {
         const Q = S.round.questions[k];
-        for (const sid of Q.participants) if (Q.marks[sid] === undefined) Q.marks[sid] = true;
+        for (const sid of Q.participants) {
+          if (Q.marks[sid] !== undefined) continue;
+          // 手寫題已經批了幾個字：沒批的字標對，批過的維持老師的判斷
+          if (perCell(Q) && Q.cellMarks[sid]) cellMarksOf(Q, sid).forEach((m, i) => { if (m === undefined) setCellMark(Q, sid, i, true); });
+          else Q.marks[sid] = true;
+        }
       }
       renderGrid(); renderQPanel();
       return;
