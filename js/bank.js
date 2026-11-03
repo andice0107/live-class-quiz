@@ -142,7 +142,8 @@ export function answerText(q) {
 // 自動批改：true／false；需要老師判斷時回傳 undefined
 export function autoGrade(q, ans) {
   const empty = !ans || ans.v === undefined || ans.v === null || ans.v === '';
-  if (q.type === 'choice') return !!(ans && ans.submitted && ans.v === q.answer);
+  // 選擇題：時間到還沒按「確認送出」也照最後選的答案批改，不因為沒送出就算錯
+  if (q.type === 'choice') return !!(ans && ans.v === q.answer);
   if (empty) return false;
   if (q.type === 'fill') {
     const norm = s => String(s).replace(/\s+/g, '').toLowerCase();

@@ -440,7 +440,7 @@ function revealBlock(q, key, label) {
   const d = S.drafts[key];
   return `<div class="reveal-q ${e ? 'has-exp' : ''}">
     ${questionHtml(q, { label })}
-    ${q.type === 'choice' ? optionsHtml(q, { selected: d && d.submitted ? d.v : null }) : ''}
+    ${q.type === 'choice' ? optionsHtml(q, { selected: d && d.v !== null && d.v !== '' ? d.v : null }) : ''}
     <div class="reveal-label">正確答案</div>
     <div class="${input === 'draw' && [...a].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(a)}</div>
     ${e ? `<div class="explain"><div class="reveal-label">詳解</div>${textHtml(e)}</div>` : ''}
