@@ -203,3 +203,9 @@ button.hint-card.off { opacity: .2; border-style: dashed; }
 .hint-pre .hint-first svg { height: 80px; }
 .hint-pre-cell { margin: .4em 0; }
 .hint-mark { font-size: .8em; margin-left: 2px; }
+
+/* 題型標籤：師生兩端都要顯眼 */
+.q-head .badge, .badge.type-badge {
+  font-size: 1.3rem; padding: .15em .9em; font-weight: 800;
+  background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn);
+}

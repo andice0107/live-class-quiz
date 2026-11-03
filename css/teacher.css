@@ -160,3 +160,92 @@ a.button-link:hover { border-color: var(--accent); }
   display: grid; place-items: center; font-size: 2rem; font-weight: 800; color: var(--text); background: color-mix(in srgb, var(--bg) 80%, transparent); pointer-events: none; z-index: 60;
 }
 .row .spacer { flex: 1; }
+
+/* ===== 功能列：固定一列，用不到的鍵反灰 ===== */
+.topbar { flex-wrap: nowrap; gap: .35em; padding: .35em .5em; font-size: clamp(9px, .88vw, 16px); overflow-x: auto; }
+.topbar button { white-space: nowrap; padding: .4em .6em; }
+.topbar .badge { white-space: nowrap; font-size: .95em; }
+.topbar .timer { font-size: 2em; min-width: 3.2em; }
+.tb-group { display: flex; align-items: center; gap: .3em; flex: none; padding: 0 .35em; border-left: 1px solid var(--line); }
+.tb-group:first-child { border-left: 0; padding-left: 0; }
+.topbar .spacer { min-width: .5em; }
+.next-btn { flex: none; font-size: 1.15em; padding: .45em 1.2em !important; }
+/* 結束鍵：和其他鍵隔開，顏色也不同，避免誤按 */
+.tb-danger { margin-left: .8em; padding-left: .8em; border-left: 3px double var(--bad); }
+button.stop-btn { background: var(--bad-bg); color: var(--bad-ink); border: 2px solid var(--bad); }
+button.stop-btn.all { background: var(--bad); color: #fff; }
+button.stop-btn:hover:not(:disabled) { border-color: var(--text); }
+/* 全開／全遮：一個亮、一個暗，目前的狀態外框加粗 */
+button.mask-open { background: var(--ok-bg); border: 2px solid var(--good); color: var(--text); }
+button.mask-close { background: repeating-linear-gradient(45deg, var(--mask-a), var(--mask-a) 6px, var(--mask-b) 6px, var(--mask-b) 12px); border: 2px solid var(--muted); color: var(--text); }
+button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--warn); }
+
+/* 加入資訊裡的主題選單 */
+.join-theme { margin: .8em 0 0; }
+
+/* ===== 確認視窗 ===== */
+.confirm-box { min-width: min(520px, 92vw); }
+.confirm-box h2 { margin-top: 0; }
+.confirm-btns { display: flex; justify-content: flex-end; gap: .8em; margin-top: 1em; }
+
+/* ===== 即時成績 ===== */
+.score-panel { position: absolute; top: 3.6em; right: .8em; z-index: 25; width: min(560px, 60vw); max-height: calc(100dvh - 5em);
+  display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.sp-head { display: flex; align-items: center; gap: .6em; padding: .5em .8em; border-bottom: 1px solid var(--line); }
+.sp-head .spacer { flex: 1; }
+.sp-body { overflow: auto; }
+.sp-table, .rank-table { border-collapse: collapse; width: 100%; }
+.sp-table th, .sp-table td, .rank-table th, .rank-table td { padding: .3em .5em; border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
+.sp-table tbody th, .rank-table tbody th { text-align: left; }
+.sp-table thead th { position: sticky; top: 0; background: var(--panel-2); }
+.sp-table td.ok, .rank-table td.ok { color: var(--good); font-weight: 800; }
+.sp-table td.no, .rank-table td.no { color: var(--bad); font-weight: 800; }
+.sp-table td.pend { color: var(--warn); font-weight: 800; }
+.sp-table td.dots { text-align: left; white-space: normal; }
+.dot { display: inline-block; min-width: 1.3em; text-align: center; font-weight: 800; }
+.dot.ok { color: var(--good); } .dot.no { color: var(--bad); } .dot.pend { color: var(--warn); } .dot.na { color: var(--muted); }
+.rank-wrap { max-height: 60vh; overflow: auto; }
+.rank-table { font-size: 1.25rem; }
+.rank-table td.rank { font-weight: 800; color: var(--warn); }
+.rank-table td.score { font-weight: 800; }
+
+/* ===== 題目區：自動字級＋老師縮放 ===== */
+.fs-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; font-size: .85rem; }
+.fs-grp { display: inline-flex; align-items: center; gap: .15em; padding-left: .3em; }
+.fs-bar button { padding: .1em .55em; font-size: 1rem; }
+.q-panel .q-scroll { font-size: var(--base, 18px); }
+.q-panel .q-scroll .q-prompt { font-size: calc(1.5em * var(--qs, 1)); }
+.q-panel .q-scroll .passage, .q-panel .q-scroll .passage-title { font-size: calc(1.2em * var(--qs, 1)); }
+.q-panel .q-scroll .option { font-size: calc(1.25em * var(--qs, 1)); }
+.q-panel .q-scroll .answer-big { font-size: calc(4.5em * var(--as, 1)); }
+.q-panel .q-scroll .answer-mid { font-size: calc(1.8em * var(--as, 1)); }
+.q-panel .q-scroll .explain { font-size: calc(1.1em * var(--as, 1)); }
+.q-panel .q-scroll .badge { font-size: calc(1.1em * var(--qs, 1)); }
+
+/* 學生打字的答案：字級由程式自動調整 */
+.tile-text { position: absolute; inset: 0; padding: .2em .4em; line-height: 1.35; overflow: auto; overflow-wrap: anywhere; align-self: auto; }
+
+/* ===== 回看 ===== */
+.review-list { display: grid; gap: .4em; }
+.review-item { display: flex; align-items: center; gap: .6em; text-align: left; }
+.review-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 部首意義預覽 */
+.radical-pre { margin: .3em 0; padding-left: 1.2em; }
+
+/* 直式畫面：功能鍵排成一欄，放在右邊 */
+@media (orientation: portrait) {
+  .run { grid-template-columns: 1fr auto; grid-template-rows: 1fr; }
+  .topbar { grid-column: 2; grid-row: 1; flex-direction: column; align-items: stretch; flex-wrap: nowrap; overflow-y: auto; overflow-x: hidden;
+    border-bottom: 0; border-left: 1px solid var(--line); width: 9.5em; font-size: clamp(11px, 1.6vw, 16px); }
+  .tb-group { flex-direction: column; align-items: stretch; border-left: 0; border-top: 1px solid var(--line); padding: .35em 0 0; }
+  .tb-group:first-child { border-top: 0; }
+  .tb-group.extend { flex-direction: row; }
+  .tb-group.extend button { flex: 1; padding: .4em .1em; }
+  .topbar .badge, .topbar .timer { text-align: center; }
+  .tb-danger { margin: 1em 0 0; padding: 1em 0 0; border-left: 0; border-top: 3px double var(--bad); }
+  .stage { grid-column: 1; grid-row: 1; grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .q-panel { max-height: 45vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .join-panel { top: .8em; left: auto; right: 11em; }
+  .score-panel { right: 10.5em; }
+}

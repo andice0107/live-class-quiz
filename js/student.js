@@ -21,6 +21,7 @@ const S = {
   pen: null,          // 老師的作答開關
   score: null,
   theme: null,
+  selfMask: false,    // 學生自己遮住答案（防偷看）；每一題開始時解除
 };
 
 // ---------- 加入 ----------
@@ -93,7 +94,7 @@ function render(force = false) {
   const c = S.cur;
   const phase = c?.phase || 'waiting';
   const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}|${phase === 'revealed' ? c.guide !== false : ''}`;
-  if (!force && sig === S.viewSig) { tick(); syncHints(); return; }
+  if (!force && sig === S.viewSig) { tick(); syncHints(); syncRadical(); return; }
   S.viewSig = sig;
   if (S.inkUnsub) { S.inkUnsub(); S.inkUnsub = null; }
   S.cells = null;
@@ -103,6 +104,25 @@ function render(force = false) {
   else if (phase === 'closed') renderMessage('老師已經關閉這個教室。');
   else renderMessage('等老師出題…');
   syncHints();
+  syncRadical();
+}
+
+// ---------- 改錯字：部首意義提示 ----------
+
+// 老師開放時，題目下方顯示每個正確字的部首「意義」（不顯示部首本身）
+function syncRadical() {
+  const box = $('#radicalHint');
+  if (!box) return;
+  const c = S.cur;
+  const { key } = c && c.phase === 'answering' && c.q ? curQ() : {};
+  const r = c?.radical;
+  const raw = r && r.on && r.data ? r.data[key] : null;
+  const list = raw ? (Array.isArray(raw) ? raw : Object.values(raw)) : [];
+  const html = list.some(Boolean)
+    ? `<div class="reveal-label">💡 部首提示</div><ul>${list.map((m, i) => (m ? `<li>${list.length > 1 ? `第 ${i + 1} 個字的部首` : '正確的字，部首'}${esc(m)}</li>` : '')).join('')}</ul>`
+    : '';
+  if (box.innerHTML !== html) box.innerHTML = html;
+  box.classList.toggle('hidden', !html);
 }
 
 // ---------- 部件提示 ----------
@@ -204,7 +224,7 @@ function draft(key, q) {
 
 function renderQuestion() {
   // 新的一題：題組從第一小題開始
-  if (S.lastKeys !== keys().join(',')) { S.lastKeys = keys().join(','); S.sub = 0; }
+  if (S.lastKeys !== keys().join(',')) { S.lastKeys = keys().join(','); S.sub = 0; S.selfMask = false; }
   const { q, key, group } = curQ();
   const d = draft(key, q);
   const input = TYPES[q.type].input;
@@ -228,15 +248,30 @@ function renderQuestion() {
     <section class="s-question">
       ${group ? `<details class="s-passage" open><summary>題組文章（點一下收合）</summary>${passageHtml(group)}</details>` : ''}
       ${questionHtml(q, { label: group ? `第 ${S.sub + 1} 小題` : '' })}
+      <div id="radicalHint" class="radical-hint hidden"></div>
     </section>
-    <section class="s-answer">${answerArea}</section>
+    <section class="s-answer">${answerArea}<button id="selfMaskCover" class="self-mask-cover">🙈 答案已遮住<br><span>點這裡打開，繼續作答</span></button></section>
     <div id="penOff" class="pen-off hidden">老師暫停了作答，請看老師的說明</div>
-    <footer class="s-actions">${subNav}<span class="spacer"></span><span id="sendState" class="send-state"></span>
+    <footer class="s-actions">${subNav}<button id="selfMaskBtn" class="self-mask-btn"></button><span class="spacer"></span><span id="sendState" class="send-state"></span>
       <button id="sendBtn" class="primary big">${sendLabel}</button></footer>`;
   bindQuestion(q, key, input);
+  renderSelfMask();
   updateSendState();
   tick();
 }
+
+function renderSelfMask() {
+  app.classList.toggle('self-masked', S.selfMask);
+  const b = $('#selfMaskBtn');
+  if (b) b.textContent = S.selfMask ? '👀 打開我的答案' : '🙈 遮住我的答案';
+}
+
+app.addEventListener('click', e => {
+  if (e.target.closest('#selfMaskBtn, #selfMaskCover')) {
+    S.selfMask = !S.selfMask;
+    renderSelfMask();
+  }
+});
 
 // 每一小題各自節流，切換小題時才不會漏送
 const pushers = {};

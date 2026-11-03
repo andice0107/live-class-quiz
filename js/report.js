@@ -114,7 +114,7 @@ function cellHtml(Q, sid) {
   return `<td class="cell ${cls}" data-k="${Q.key}" data-sid="${esc(sid)}">${sym}${hint}</td>`;
 }
 
-function showQuestion(S, r, k) {
+export function showQuestion(S, r, k) {
   const Q = r.questions[k];
   const step = r.steps[Q.step];
   const st = questionStats(S, r, k);

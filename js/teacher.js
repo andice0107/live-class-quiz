@@ -1,12 +1,14 @@
 import { openDb } from './db.js';
 import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
-import { renderSummary, computeScores } from './report.js';
+import { renderSummary, computeScores, showQuestion } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { THEMES, applyTheme, savedTheme, saveTheme } from './theme.js';
 import { questionHints, hintCardsHtml } from './hints.js';
+import { radicalOf } from './radicals.js';
 
 const USED_KEY = 'lcq-used';
+const FS_KEY = 'lcq-font-scale';
 
 const S = {
   db: null,
@@ -25,6 +27,10 @@ const S = {
   hintOn: false,        // 這一題是否開放部件提示
   hintPrep: null,       // 準備部件提示中（Promise）
   hintUsed: {},         // qkey -> sid -> 第一次看提示的時間
+  radicalOn: false,     // 這一題是否開放改錯字的部首意義提示
+  scoreOpen: false,     // 即時成績面板是否展開
+  // 文字縮放：q 題目、a 答案、s 學生作答（1 = 自動調到剛好放得下）
+  fs: { q: 1, a: 1, s: 1, ...JSON.parse(localStorage.getItem(FS_KEY) || '{}') },
   collab: null,         // 正在協助的學生手寫板
   theme: savedTheme(),
   unsub: [],
@@ -246,7 +252,19 @@ function qrSvg(text) {
 }
 
 function renderJoinPanel() {
-  $('#joinPanel').innerHTML = joinBlockHtml(false);
+  $('#joinPanel').innerHTML = `${joinBlockHtml(false)}
+    <div class="row join-theme"><label>畫面主題 <select class="theme-select"></select></label><span class="spacer"></span><span class="muted small">點空白處收合</span></div>`;
+  fillThemeSelects();
+}
+
+function fillThemeSelects() {
+  for (const sel of $$('.theme-select')) {
+    if (!sel.options.length) {
+      sel.innerHTML = Object.entries(THEMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+      sel.addEventListener('change', () => setTheme(sel.value));
+    }
+    sel.value = S.theme;
+  }
 }
 
 // ---------- 出題流程 ----------
@@ -265,7 +283,9 @@ async function startStep(i) {
   phase = 'answering';
   S.subTab = 'follow';
   S.showAnswer = false;
-  if (S.defaultMask !== null) S.masks = {};
+  // 每進入新的一題，學生畫面預設全部遮蔽，老師再自己打開
+  S.defaultMask = true;
+  S.masks = {};
   step.startedAt = now;
   S.used.add(step.item.id);
   sessionStorage.setItem(USED_KEY, JSON.stringify([...S.used]));
@@ -280,8 +300,10 @@ async function startStep(i) {
       renderGrid();
     }),
   ]);
-  // 每一題開始時，部件提示先關閉，由老師決定要不要開
+  // 每一題開始時，部件提示、部首意義先關閉，由老師決定要不要開
   S.hintOn = false;
+  S.radicalOn = false;
+  stopReading();
   // 每一題開始時，全班都可以作答
   S.pen = { all: true, by: {} };
   await S.db.set(`rooms/${S.room}/pen`, S.pen);
@@ -306,12 +328,15 @@ async function endStep() {
   }
   S.guide = true;
   S.hintOn = false;
-  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, hint: null, endsAt: null, endedAt: S.db.now() });
+  S.radicalOn = false;
+  await S.db.update(`rooms/${S.room}/current`, { phase, reveal, guide: true, hint: null, radical: null, endsAt: null, endedAt: S.db.now() });
   const guides = step.keys.flatMap(k => guideChars(S.round.questions[k].q.type, answerText(S.round.questions[k].q)));
   if (guides.length) ensureKai(guides).then(() => { tileSigs = new WeakMap(); renderGrid(); });
   renderRun();
   // 等最後一刻按下送出的答案傳到，再自動批改
+  S.gradingNow = true;
   S.grading = new Promise(res => setTimeout(() => {
+    S.gradingNow = false;
     for (const k of step.keys) {
       const Q = S.round.questions[k];
       const ans = S.answers[k] || {};
@@ -328,15 +353,36 @@ async function endStep() {
   await S.grading;
 }
 
+// 這一題還有幾位學生沒有批改
+function pendingCount(step) {
+  if (!step || phase !== 'revealed') return 0;
+  return step.keys.reduce((n, k) => {
+    const Q = S.round.questions[k];
+    return n + Q.participants.filter(sid => Q.marks[sid] === undefined).length;
+  }, 0);
+}
+
 async function next() {
   const r = S.round;
-  if (phase === 'answering') return;
+  if (phase === 'answering' || S.nextBusy) return;
   await S.grading;
-  if (r.idx + 1 < r.steps.length) await startStep(r.idx + 1);
-  else await finishRound();
+  if (pendingCount(current())) { renderRun(); return; }
+  S.nextBusy = true;
+  try {
+    // 進入下一題前，先看目前的即時排行，按確認才真的換題
+    if (r.idx >= 0) {
+      const last = r.idx + 1 >= r.steps.length;
+      const ok = await confirmBox(`<h2>目前的成績排行</h2>${rankingHtml()}`, last ? '確認，看成績' : '確認，進入下一題');
+      if (!ok) return;
+    }
+    if (r.idx + 1 < r.steps.length) await startStep(r.idx + 1);
+    else await finishRound();
+  } finally { S.nextBusy = false; renderRun(); }
 }
 
 async function finishRound() {
+  stopReading();
+  $('#scorePanel').classList.add('hidden');
   if (phase === 'answering') await endStep();
   const r = S.round;
   r.finished = true;
@@ -375,20 +421,34 @@ function renderRun() {
   if (!S.room || !S.round) return;
   const ids = Object.keys(S.students);
   const online = ids.filter(id => S.students[id].online !== false).length;
-  $('#studentCount').textContent = `學生 ${online} 人${online !== ids.length ? `（離線 ${ids.length - online}）` : ''}`;
+  $('#studentCount').textContent = `${online} 人${online !== ids.length ? `（離線 ${ids.length - online}）` : ''}`;
   const r = S.round;
-  $('#progress').textContent = r && r.idx >= 0 ? `第 ${r.idx + 1} / ${r.steps.length} 題` : `共 ${r ? r.steps.length : 0} 題，尚未開始`;
-  $('#endBtn').classList.toggle('hidden', phase !== 'answering');
-  $('#penAllBtn').classList.toggle('hidden', phase !== 'answering');
+  $('#progress').textContent = r && r.idx >= 0 ? `${r.idx + 1}/${r.steps.length} 題` : `共 ${r ? r.steps.length : 0} 題`;
+  const answering = phase === 'answering';
+  const step = current();
+  $('#endBtn').disabled = !answering;
+  $('#earlyEnd').disabled = r.idx < 0;
+  $('#penAllBtn').disabled = !answering;
   renderPenAll();
   renderHintBtn();
-  $('#extendBox').classList.toggle('hidden', !(phase === 'answering' && endsAt));
-  const nb = $('#nextBtn');
-  nb.classList.toggle('hidden', phase === 'answering');
-  nb.textContent = r.idx < 0 ? '開始第一題' : (r.idx + 1 < r.steps.length ? '下一題' : '完成，看成績');
+  renderRadicalBtn();
+  for (const b of $$('#extendBox button')) b.disabled = !(answering && endsAt);
+  $('#readBtn').disabled = !step;
+  $('#scoreBtn').disabled = r.idx < 0 && !S.scoreOpen;
+  $('#reviewBtn').disabled = !reviewKeys().length;
+  renderNextBtn();
   renderTimer();
   renderQPanel();
   renderGrid();
+}
+
+function renderNextBtn() {
+  const r = S.round;
+  const nb = $('#nextBtn');
+  const pending = pendingCount(current());
+  nb.disabled = phase === 'answering' || S.gradingNow || !!pending || !!S.nextBusy;
+  nb.textContent = r.idx < 0 ? '開始第一題' : (r.idx + 1 < r.steps.length ? '下一題 ▶' : '完成，看成績');
+  nb.title = phase === 'answering' ? '先結束這一題的作答' : pending ? `還有 ${pending} 位學生沒有批改對錯` : '';
 }
 
 function renderTimer() {
@@ -412,8 +472,21 @@ function renderQPanel() {
   const step = current();
   if (!step) {
     p.innerHTML = `<div class="lobby">${joinBlockHtml(true)}<p class="muted">學生都加入後，按上方「開始第一題」。</p></div>`;
+    p.lastHtml = '';
     return;
   }
+  const html = qPanelHtml(step);
+  if (html === p.lastHtml) return;
+  p.lastHtml = html;
+  const scroll = p.querySelector('.q-scroll');
+  const keep = scroll ? scroll.scrollTop : 0;
+  p.innerHTML = html;
+  fitQPanel();
+  const ns = p.querySelector('.q-scroll');
+  if (ns) ns.scrollTop = keep;
+}
+
+function qPanelHtml(step) {
   const r = S.round;
   const it = step.item;
   const revealed = phase !== 'answering';
@@ -430,7 +503,7 @@ function renderQPanel() {
         ${q.type === 'choice' ? optionsHtml(q, { correct: revealed || S.showAnswer ? q.answer : null }) : ''}
         ${revealed || S.showAnswer ? `<div class="answer-mid">答案：${textHtml(answerText(q))}</div>${explainHtml(q)}` : ''}</div>`;
     });
-    if (!revealed) html += hintPreviewHtml(step);
+    if (!revealed) html += hintPreviewHtml(step) + radicalPreviewHtml(step);
     html += `</div><div class="sub-tabs">${tabs.join('')}</div>`;
   } else {
     const k = step.keys[0];
@@ -440,7 +513,7 @@ function renderQPanel() {
       ${q.type === 'choice' ? optionsHtml(q, { correct: showAns ? q.answer : null }) : ''}
       ${showAns && q.type !== 'choice' ? `<div class="${TYPES[q.type].input === 'draw' && [...answerText(q)].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(answerText(q))}</div>` : ''}
       ${showAns ? explainHtml(q) : ''}
-      ${revealed ? '' : hintPreviewHtml(step)}
+      ${revealed ? '' : hintPreviewHtml(step) + radicalPreviewHtml(step)}
       </div><div class="q-foot"><span>已送出 ${submittedCount(k)} / ${n}</span></div>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
@@ -450,7 +523,65 @@ function renderQPanel() {
     }
     html += gradeBar(step);
   }
-  p.innerHTML = html;
+  return fontBarHtml() + html;
+}
+
+// ---------- 文字縮放 ----------
+
+function fontBarHtml() {
+  const grp = (k, name) => `<span class="fs-grp">${name}<button data-fs="${k}" data-d="-1" title="${name}縮小">－</button><button data-fs="${k}" data-d="1" title="${name}放大">＋</button></span>`;
+  const custom = S.fs.q !== 1 || S.fs.a !== 1 || S.fs.s !== 1;
+  return `<div class="fs-bar"><span class="muted">字級</span>${grp('q', '題目')}${grp('a', '答案')}${grp('s', '學生作答')}<button data-fs="reset" ${custom ? '' : 'disabled'} title="回到自動大小">自動</button></div>`;
+}
+
+function changeFont(k, d) {
+  if (k === 'reset') S.fs = { q: 1, a: 1, s: 1 };
+  else S.fs[k] = Math.min(3, Math.max(0.4, Math.round(S.fs[k] * (d > 0 ? 1.15 : 1 / 1.15) * 100) / 100));
+  try { localStorage.setItem(FS_KEY, JSON.stringify(S.fs)); } catch { /* 無痕視窗存不了，沒關係 */ }
+  renderQPanel();
+  tileSigs = new WeakMap();
+  renderGrid();
+}
+
+// 自動找出剛好能把題目區全部放進畫面的字級，再乘上老師調的倍數
+function fitQPanel() {
+  const box = $('#qPanel .q-scroll');
+  if (!box) return;
+  // 只有題目內容或視窗大小改變時才重新計算（作答人數更新時沿用）
+  const sig = `${box.innerHTML.length}|${box.clientWidth}x${box.clientHeight}`;
+  box.style.setProperty('--qs', 1);
+  box.style.setProperty('--as', 1);
+  if (fitQPanel.sig === sig) {
+    box.style.setProperty('--base', fitQPanel.base + 'px');
+    box.style.setProperty('--qs', S.fs.q);
+    box.style.setProperty('--as', S.fs.a);
+    return;
+  }
+  let lo = 12, hi = 44;
+  while (hi - lo > 0.5) {
+    const mid = (lo + hi) / 2;
+    box.style.setProperty('--base', mid + 'px');
+    if (box.scrollHeight <= box.clientHeight + 1 && box.scrollWidth <= box.clientWidth + 1) lo = mid; else hi = mid;
+  }
+  box.style.setProperty('--base', lo + 'px');
+  fitQPanel.sig = sig;
+  fitQPanel.base = lo;
+  box.style.setProperty('--qs', S.fs.q);
+  box.style.setProperty('--as', S.fs.a);
+}
+
+// 學生打字的答案：自動調到剛好塞滿縮圖，再乘上老師調的倍數
+function fitTileText(el) {
+  // 還沒排版好（量不到大小）就等下一個畫面再量
+  if (!el.isConnected || !el.clientHeight) { requestAnimationFrame(() => el.isConnected && el.clientHeight && fitTileText(el)); return; }
+  el.style.fontSize = '';
+  let lo = 12, hi = 96;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) / 2;
+    el.style.fontSize = mid + 'px';
+    if (el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1) lo = mid; else hi = mid;
+  }
+  el.style.fontSize = Math.round(lo * S.fs.s) + 'px';
 }
 
 function explainHtml(q) {
@@ -531,6 +662,9 @@ function renderGrid() {
     fillTile(el, sid, step);
   }
   layoutGrid(sids.length);
+  renderMaskBtns();
+  renderScorePanel();
+  if (S.round) renderNextBtn();
 }
 
 let tileSigs = new WeakMap();
@@ -584,7 +718,11 @@ function fillTile(el, sid, step) {
       }
     } else if (!a || a.v === undefined || a.v === null || a.v === '') body.innerHTML = '<span class="muted">（空白）</span>';
     else if (input === 'choice') body.innerHTML = `<div class="tile-choice">${letter(a.v)}${a.submitted ? '' : '<span class="small muted">（未確認）</span>'}</div>`;
-    else body.innerHTML = `<div class="tile-text">${textHtml(a.v)}</div>`;
+    else {
+      body.innerHTML = `<div class="tile-text">${textHtml(a.v)}</div>`;
+      const t = body.firstChild;
+      requestAnimationFrame(() => fitTileText(t));
+    }
   }
   const mark = Q.marks[sid];
   el.classList.toggle('right', mark === true);
@@ -689,8 +827,8 @@ function setTheme(name) {
 
 function renderHintBtn() {
   const b = $('#hintBtn');
-  b.classList.toggle('hidden', !(phase === 'answering' && stepHasHanzi(current())));
-  b.textContent = S.hintOn ? '部件提示：開放中' : '部件提示：關閉';
+  b.disabled = !(phase === 'answering' && stepHasHanzi(current()));
+  b.textContent = S.hintOn ? '部件提示 開' : '部件提示';
   b.classList.toggle('primary', S.hintOn);
 }
 
@@ -733,8 +871,203 @@ function hintPreviewHtml(step) {
 function renderPenAll() {
   const b = $('#penAllBtn');
   if (!b) return;
-  b.textContent = S.pen.all ? '全班作答：開放中' : '全班作答：暫停中';
+  b.textContent = S.pen.all ? '作答：開放' : '作答：暫停';
   b.classList.toggle('warn', !S.pen.all);
+}
+
+// ---------- 改錯字：部首意義提示 ----------
+
+// 每個要改的正確字的部首和意義；查不到的字是 null
+function radicalData(Q) {
+  if (Q.q.type !== 'correction') return null;
+  if (Q.radicals === undefined) {
+    const list = guideChars('correction', answerText(Q.q)).map(ch => {
+      const r = radicalOf(ch);
+      return r ? { ch, ...r } : null;
+    });
+    Q.radicals = list.some(Boolean) ? list : null;
+  }
+  return Q.radicals;
+}
+const stepRadicals = step => step ? step.keys.filter(k => radicalData(S.round.questions[k])) : [];
+
+function renderRadicalBtn() {
+  const b = $('#radicalBtn');
+  b.disabled = !(phase === 'answering' && stepRadicals(current()).length);
+  b.textContent = S.radicalOn ? '部首意義 開' : '部首意義';
+  b.classList.toggle('primary', S.radicalOn);
+}
+
+async function toggleRadical() {
+  const step = current();
+  if (phase !== 'answering' || !step) return;
+  S.radicalOn = !S.radicalOn;
+  // 學生只拿到意義，拿不到部首本身
+  const data = S.radicalOn
+    ? Object.fromEntries(stepRadicals(step).map(k => [k, radicalData(S.round.questions[k]).map(x => (x ? x.meaning : ''))]))
+    : null;
+  await S.db.update(`rooms/${S.room}/current`, { radical: data ? { on: true, data } : null });
+  renderRadicalBtn(); renderQPanel();
+}
+
+// 老師端預覽：老師看得到部首，學生只看得到意義
+function radicalPreviewHtml(step) {
+  if (!S.radicalOn) return '';
+  const rows = stepRadicals(step).flatMap(k => radicalData(S.round.questions[k]).map((x, i, all) => {
+    const which = all.length > 1 ? `第 ${i + 1} 個字` : '正確的字';
+    return x ? `<li>${which}「${esc(x.ch)}」：部首 <b>${esc(x.radical)}</b>，學生看到「部首${esc(x.meaning)}」</li>`
+      : `<li>${which}：查不到部首，學生不會看到這一個的提示</li>`;
+  }));
+  return `<div class="hint-pre"><div class="reveal-label">部首意義提示（學生畫面上看得到意義，看不到部首）</div><ul class="radical-pre">${rows.join('')}</ul></div>`;
+}
+
+// ---------- 讀題 ----------
+
+function speakText(step) {
+  const clean = t => String(t || '').replace(/[（(]\s*[）)]/g, '，空格，').replace(/[　_＿]{2,}/g, '，空格，');
+  const one = q => {
+    let t = clean(q.prompt);
+    if (q.type === 'choice') t += '。' + q.options.map((o, i) => `${letter(i)}，${clean(o.text) || '圖片'}`).join('。');
+    return t;
+  };
+  const it = step.item;
+  if (it.type !== 'group') return one(it);
+  const subs = typeof S.subTab === 'number' ? [it.subs[S.subTab]] : it.subs;
+  const head = typeof S.subTab === 'number' ? '' : `${clean(it.title)}。${clean(it.passage)}。`;
+  return head + subs.map((q, j) => `第${typeof S.subTab === 'number' ? S.subTab + 1 : j + 1}小題。${one(q)}`).join('。');
+}
+
+function readQuestion() {
+  const synth = window.speechSynthesis;
+  if (!synth) { alert('這台電腦的瀏覽器不支援朗讀。'); return; }
+  if (synth.speaking) { stopReading(); return; }
+  const step = current();
+  if (!step) return;
+  const u = new SpeechSynthesisUtterance(speakText(step));
+  u.lang = 'zh-TW';
+  const voice = synth.getVoices().find(v => /zh[-_]TW/i.test(v.lang)) || synth.getVoices().find(v => /^zh/i.test(v.lang));
+  if (voice) u.voice = voice;
+  u.rate = 0.9;
+  u.onend = u.onerror = () => renderReadBtn(false);
+  synth.speak(u);
+  renderReadBtn(true);
+}
+
+function stopReading() {
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  renderReadBtn(false);
+}
+
+function renderReadBtn(on) {
+  const b = $('#readBtn');
+  b.textContent = on ? '⏹ 停止朗讀' : '🔊 讀題';
+  b.classList.toggle('primary', on);
+}
+
+// ---------- 確認視窗 ----------
+
+function confirmBox(html, okLabel, { danger = false } = {}) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.innerHTML = `<div class="modal-box confirm-box"><div class="modal-body">${html}</div>
+      <div class="confirm-btns"><button data-no class="big">取消</button><button data-ok class="big ${danger ? 'stop-btn' : 'primary'}">${esc(okLabel)}</button></div></div>`;
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.addEventListener('click', e => {
+      if (e.target.closest('[data-ok]')) done(true);
+      else if (e.target === wrap || e.target.closest('[data-no]')) done(false);
+    });
+    document.body.append(wrap);
+  });
+}
+
+// ---------- 即時成績 ----------
+
+// 已經公布答案的題目
+function gradedKeys() {
+  const r = S.round;
+  if (!r) return [];
+  return r.order.filter(k => {
+    const i = r.questions[k].step;
+    return i < r.idx || (i === r.idx && phase !== 'answering');
+  });
+}
+
+function liveScores() {
+  const r = S.round;
+  const keys = gradedKeys();
+  return Object.keys(S.students).map(sid => {
+    let right = 0, wrong = 0, pend = 0, asked = 0;
+    const marks = keys.map(k => {
+      const Q = r.questions[k];
+      if (!Q.participants.includes(sid)) return { k, m: 'na' };
+      asked++;
+      const m = Q.marks[sid];
+      if (m === true) right++; else if (m === false) wrong++; else pend++;
+      return { k, m: m === true ? 'ok' : m === false ? 'no' : 'pend' };
+    });
+    return { sid, right, wrong, pend, asked, score: asked ? Math.round(right / asked * 100) : 0, marks };
+  });
+}
+
+function rankingHtml() {
+  const list = liveScores().filter(x => x.asked).sort((a, b) => b.right - a.right || a.wrong - b.wrong || a.sid.localeCompare(b.sid, 'en', { numeric: true }));
+  if (!list.length) return '<p class="muted">目前還沒有成績。</p>';
+  let rank = 0, prev = null;
+  const rows = list.map((x, i) => {
+    if (!prev || x.right !== prev.right || x.wrong !== prev.wrong) rank = i + 1;
+    prev = x;
+    return `<tr><td class="rank">${rank}</td><th>${esc(x.sid)}</th><td class="ok">${x.right}</td><td class="no">${x.wrong}</td><td class="score">${x.score}</td></tr>`;
+  });
+  return `<p class="muted">已出 ${gradedKeys().length} 題，分數＝答對題數 ÷ 已作答題數 × 100</p>
+    <div class="rank-wrap"><table class="rank-table"><thead><tr><th>名次</th><th>學生</th><th>答對</th><th>答錯</th><th>目前分數</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+function renderScorePanel() {
+  const p = $('#scorePanel');
+  $('#scoreBtn').classList.toggle('primary', S.scoreOpen);
+  if (!S.scoreOpen || !S.round) { p.classList.add('hidden'); return; }
+  p.classList.remove('hidden');
+  const r = S.round;
+  const list = liveScores().sort((a, b) => a.sid.localeCompare(b.sid, 'en', { numeric: true }));
+  const sym = { ok: '○', no: '✕', pend: '？', na: '—' };
+  const rows = list.map(x => `<tr><th>${esc(x.sid)}</th><td class="ok">${x.right}</td><td class="no">${x.wrong}</td><td class="pend">${x.pend || ''}</td>
+    <td class="dots">${x.marks.map(({ k, m }) => `<span class="dot ${m}" title="第 ${esc(r.questions[k].label)} 題">${sym[m]}</span>`).join('')}</td></tr>`);
+  p.innerHTML = `<div class="sp-head"><b>即時成績</b><span class="muted small">已公布 ${gradedKeys().length} 題</span><span class="spacer"></span><button data-close title="收合">收合 ▴</button></div>
+    <div class="sp-body"><table class="sp-table"><thead><tr><th>學生</th><th>對</th><th>錯</th><th>待批</th><th>每一題</th></tr></thead><tbody>${rows.join('') || '<tr><td colspan="5" class="muted">還沒有學生</td></tr>'}</tbody></table></div>`;
+}
+
+// ---------- 回看前面的題目 ----------
+
+function reviewKeys() {
+  return gradedKeys();
+}
+
+function openReview() {
+  const r = S.round;
+  const keys = reviewKeys();
+  if (!keys.length) return;
+  const items = keys.map(k => {
+    const Q = r.questions[k];
+    const right = Q.participants.filter(sid => Q.marks[sid] === true).length;
+    const text = String(Q.q.prompt || '').replace(/\s+/g, ' ');
+    return `<button class="review-item" data-q="${k}"><span class="badge type-badge">第 ${esc(Q.label)} 題．${TYPES[Q.q.type].label}</span>
+      <span class="review-text">${esc(text.length > 40 ? text.slice(0, 40) + '…' : text)}</span><span class="muted small">答對 ${right}/${Q.participants.length}</span></button>`;
+  }).join('');
+  const m = showModal(`<h2>回看前面的題目</h2><p class="muted">只能看題目和大家的作答，學生不能重新作答。點一題看詳細內容。</p><div class="review-list">${items}</div>`);
+  m.addEventListener('click', e => {
+    const b = e.target.closest('[data-q]');
+    if (b) showQuestion(S, r, b.dataset.q);
+  });
+}
+
+// ---------- 遮蔽 ----------
+
+function renderMaskBtns() {
+  const anyOpen = Object.keys(S.students).some(sid => !(S.masks[sid] ?? S.defaultMask));
+  const anyMasked = Object.keys(S.students).some(sid => (S.masks[sid] ?? S.defaultMask));
+  $('#showAll').classList.toggle('active', !anyMasked);
+  $('#maskAll').classList.toggle('active', !anyOpen);
 }
 
 // ---------- 事件 ----------
@@ -800,7 +1133,7 @@ function bind() {
     p.classList.toggle('hidden');
     $('#joinToggle').textContent = p.classList.contains('hidden') ? '加入資訊 ▾' : '加入資訊 ▴';
   });
-  $('#joinPanel').addEventListener('click', () => $('#joinToggle').click());
+  $('#joinPanel').addEventListener('click', e => { if (!e.target.closest('select, label')) $('#joinToggle').click(); });
   $('#nextBtn').addEventListener('click', next);
   $('#penAllBtn').addEventListener('click', () => {
     S.pen = { all: !S.pen.all, by: {} };
@@ -808,13 +1141,17 @@ function bind() {
     renderPenAll();
     renderGrid();
   });
-  for (const sel of $$('.theme-select')) {
-    sel.innerHTML = Object.entries(THEMES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
-    sel.value = S.theme;
-    sel.addEventListener('change', () => setTheme(sel.value));
-  }
-  $('#endBtn').addEventListener('click', endStep);
+  fillThemeSelects();
+  $('#endBtn').addEventListener('click', async () => {
+    if (phase !== 'answering') return;
+    if (await confirmBox('<h2>要結束這一題的作答嗎？</h2><p>結束後學生就不能再修改，畫面會公布答案。</p>', '確認結束本題作答', { danger: true })) endStep();
+  });
   $('#hintBtn').addEventListener('click', toggleHints);
+  $('#radicalBtn').addEventListener('click', toggleRadical);
+  $('#readBtn').addEventListener('click', readQuestion);
+  $('#scoreBtn').addEventListener('click', () => { S.scoreOpen = !S.scoreOpen; renderScorePanel(); });
+  $('#scorePanel').addEventListener('click', e => { if (e.target.closest('[data-close]')) { S.scoreOpen = false; renderScorePanel(); } });
+  $('#reviewBtn').addEventListener('click', openReview);
   $('#extendBox').addEventListener('click', async e => {
     const add = Number(e.target.dataset.add);
     if (!add || phase !== 'answering' || !endsAt) return;
@@ -822,8 +1159,9 @@ function bind() {
     await S.db.update(`rooms/${S.room}/current`, { endsAt });
     renderTimer();
   });
-  $('#earlyEnd').addEventListener('click', () => {
-    if (confirm('確定要提早結束嗎？會用目前已經出過的題目計算分數。')) finishRound();
+  $('#earlyEnd').addEventListener('click', async () => {
+    const ok = await confirmBox('<h2>要提早結束所有題目嗎？</h2><p>後面還沒出的題目都不會再出，分數只用已經出過的題目計算。</p>', '確認結束所有題目作答', { danger: true });
+    if (ok) finishRound();
   });
   $('#showAll').addEventListener('click', () => { S.defaultMask = false; S.masks = {}; renderGrid(); });
   $('#maskAll').addEventListener('click', () => { S.defaultMask = true; S.masks = {}; renderGrid(); });
@@ -851,6 +1189,8 @@ function bind() {
     renderGrid();
   });
   $('#qPanel').addEventListener('click', e => {
+    const fs = e.target.closest('[data-fs]');
+    if (fs) { changeFont(fs.dataset.fs, Number(fs.dataset.d)); return; }
     if (e.target.id === 'peekBtn') { S.showAnswer = !S.showAnswer; renderQPanel(); return; }
     if (e.target.id === 'guideBtn') {
       S.guide = !S.guide;
@@ -870,6 +1210,7 @@ function bind() {
     if (sub) { S.subTab = sub.dataset.sub === 'follow' ? 'follow' : Number(sub.dataset.sub); renderQPanel(); renderGrid(); }
   });
   new ResizeObserver(() => layoutGrid(Object.keys(S.students).length)).observe($('#grid'));
+  new ResizeObserver(() => { $('#qPanel').lastHtml = ''; renderQPanel(); }).observe($('#qPanel'));
   enableImageZoom(document.body);
 }
 

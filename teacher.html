@@ -60,26 +60,38 @@
 
 <!-- 上課畫面 -->
 <div id="run" class="run hidden">
+  <!-- 功能列：每個按鍵位置固定，這一題用不到就反灰 -->
   <header class="topbar">
-    <button id="joinToggle">加入資訊 ▾</button>
-    <span id="studentCount" class="badge">學生 0 人</span>
-    <span id="progress" class="badge">尚未開始</span>
-    <div id="timer" class="timer">--:--</div>
-    <div id="extendBox" class="extend">
-      <span class="muted">延長時間</span>
-      <button data-add="10">+10秒</button><button data-add="20">+20秒</button><button data-add="30">+30秒</button>
+    <div class="tb-group">
+      <button id="joinToggle" title="QR code、認證碼、畫面主題">加入資訊 ▾</button>
+      <span id="studentCount" class="badge">學生 0 人</span>
+      <span id="progress" class="badge">尚未開始</span>
+      <div id="timer" class="timer">--:--</div>
     </div>
-    <button id="penAllBtn">全班作答：開放中</button>
-    <button id="hintBtn" class="hidden">部件提示：關閉</button>
-    <button id="endBtn" class="warn">直接結束作答</button>
-    <button id="nextBtn" class="primary">開始第一題</button>
+    <div id="extendBox" class="tb-group extend" title="延長作答時間">
+      <button data-add="10">+10</button><button data-add="20">+20</button><button data-add="30">+30</button>
+    </div>
+    <div class="tb-group">
+      <button id="penAllBtn" title="開放或暫停全班作答">全班作答：開放</button>
+      <button id="hintBtn" title="寫國字題：開放或關閉部件提示">部件提示：關</button>
+      <button id="radicalBtn" title="改錯字題：開放或關閉部首意義提示">部首意義：關</button>
+      <button id="readBtn" title="把畫面上的題目唸出來">🔊 讀題</button>
+    </div>
+    <div class="tb-group">
+      <button id="showAll" class="mask-open" title="打開所有學生的作答畫面">👁 全開</button>
+      <button id="maskAll" class="mask-close" title="遮住所有學生的作答畫面">▦ 全遮</button>
+      <button id="scoreBtn" title="展開或收合即時成績">📊 成績</button>
+      <button id="reviewBtn" title="回看前面的題目（只能看，不能重新作答）">⏪ 回看</button>
+    </div>
     <span class="spacer"></span>
-    <select class="theme-select" title="畫面主題"></select>
-    <button id="showAll">全開</button>
-    <button id="maskAll">全遮</button>
-    <button id="earlyEnd" class="danger">提早結束</button>
+    <button id="nextBtn" class="primary next-btn">開始第一題</button>
+    <div class="tb-group tb-danger">
+      <button id="endBtn" class="stop-btn">⏹ 結束本題</button>
+      <button id="earlyEnd" class="stop-btn all">⏹ 提早結束</button>
+    </div>
   </header>
   <div id="joinPanel" class="join-panel hidden"></div>
+  <aside id="scorePanel" class="score-panel hidden"></aside>
   <main class="stage">
     <section id="qPanel" class="q-panel"></section>
     <section id="grid" class="grid"></section>

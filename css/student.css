@@ -55,3 +55,17 @@
 .s-final { flex: 1; display: grid; place-content: center; text-align: center; gap: .2em; font-size: 1.6rem; }
 .final-score { font-size: clamp(6rem, 30dvh, 16rem); font-weight: 800; color: var(--warn); line-height: 1; }
 .final-detail { font-size: 2rem; font-weight: 700; }
+
+/* 學生自己遮住答案，防同學偷看 */
+.s-answer { position: relative; }
+.self-mask-cover { display: none; position: absolute; inset: 0; z-index: 5; border-radius: var(--radius); font-size: 2rem; font-weight: 800; color: var(--text);
+  background: repeating-linear-gradient(45deg, var(--mask-a), var(--mask-a) 14px, var(--mask-b) 14px, var(--mask-b) 28px); border: 2px solid var(--line); }
+.self-mask-cover span { font-size: 1.1rem; font-weight: 600; color: var(--muted); }
+.self-masked .self-mask-cover { display: block; }
+.self-masked .s-answer .hint-btn { visibility: hidden; }
+.self-mask-btn { white-space: nowrap; }
+.self-masked .self-mask-btn { background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn); }
+
+/* 改錯字的部首意義提示 */
+.radical-hint { margin-top: .4em; padding: .4em .8em; border-radius: 10px; background: var(--sel-bg); border: 1px solid var(--warn); font-size: 1.35rem; }
+.radical-hint ul { margin: .2em 0; padding-left: 1.3em; }
