@@ -70,6 +70,8 @@ function normQuestion(raw, id, errors, where) {
   // 改錯字：題目裡的錯字（依出現順序），讓老師一鍵圈出來
   const wrong = raw.wrong ?? raw.錯字;
   if (wrong) q.wrong = (Array.isArray(wrong) ? wrong.join('') : String(wrong)).match(/[\u3400-\u9fff\uf900-\ufaff]/g) || [];
+  // 老師已確認過要圈的位置（從設定頁「下載已設定錯字的題庫檔」來的）
+  if (Array.isArray(raw.circle)) q.circle = raw.circle.map(Number).filter(n => Number.isInteger(n) && n >= 0);
   if (raw.time !== undefined && raw.time !== null && raw.time !== '') q.time = Number(raw.time);
   if (type === 'choice') {
     q.options = normOptions(raw.options);
@@ -99,7 +101,7 @@ export function normalizeBank(raw, fileTag = 'bank') {
       if (q) items.push(q);
     }
   });
-  return { title: raw.title || fileTag, subject: raw.subject || '', items, errors };
+  return { title: raw.title || fileTag, subject: raw.subject || '', items, errors, raw, fileTag };
 }
 
 export async function readBankFile(file) {
@@ -125,7 +127,7 @@ export async function readBankFile(file) {
 export function publicQuestion(q) {
   // 格數要在拿掉答案前算好（例如寫國字依答案字數決定格數）
   if (TYPES[q.type].input === 'draw' && !q.cells && q.type !== 'word') q = { ...q, cells: defaultCells(q) };
-  const { answer, explanation, wrong, ...rest } = q;
+  const { answer, explanation, wrong, circle, ...rest } = q;
   return rest;
 }
 

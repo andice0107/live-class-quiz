@@ -31,7 +31,7 @@ const S = {
   hintUsed: {},         // qkey -> sid -> 第一次看提示的時間
   radicalOn: false,     // 這一題是否開放改錯字的部首意義提示
   circles: {},          // qkey -> 改錯字題目裡圈起來的錯字位置（老師按「圈出錯字」才有）
-  preset: (() => { try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '{}'); } catch { return {}; } })(),
+  preset: {},           // 這台電腦暫存的改錯字錯字設定（啟動時載入，見 loadPreset）
   scoreOpen: false,     // 即時成績面板是否展開
   // 文字縮放：q 題目、a 答案、s 學生作答（1 = 自動調到剛好放得下）
   fs: { q: 1, a: 1, s: 1, ...JSON.parse(localStorage.getItem(FS_KEY) || '{}') },
@@ -159,11 +159,31 @@ function correctionQs() {
   return S.items.flatMap(it => (it.type === 'group' ? it.subs : [it])).filter(q => q.type === 'correction');
 }
 
-// 要圈的位置：老師預先挑好的優先，沒有挑就用工具判斷（題庫標記）
-function circlePositions(q) {
-  const p = S.preset[String(q.prompt ?? '')];
-  return Array.isArray(p) ? p : wrongPositions(q);
+// 這台電腦暫存的錯字設定：題目文字 -> { p: 位置, t: 最後用到的時間 }；超過半年沒用到自動刪除
+const PRESET_KEEP = 183 * 24 * 3600 * 1000;
+function loadPreset() {
+  let raw = {};
+  try { raw = JSON.parse(localStorage.getItem(PRESET_KEY) || '{}') || {}; } catch {}
+  const now = Date.now(), out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    const e = Array.isArray(v) ? { p: v, t: now } : v;   // 舊格式沒有時間
+    if (e && Array.isArray(e.p) && now - (e.t || 0) < PRESET_KEEP) out[k] = e;
+  }
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(out)); } catch {}
+  return out;
 }
+const pkey = q => String(q.prompt ?? '');
+function getPreset(q) { return S.preset[pkey(q)]?.p; }
+function setPreset(q, list) {
+  if (list) S.preset[pkey(q)] = { p: list, t: Date.now() }; else delete S.preset[pkey(q)];
+}
+
+// 要圈的位置：這台電腦挑好的優先，其次是題庫檔裡已確認的，都沒有才用工具判斷（題庫標記）
+function circlePositions(q) {
+  return getPreset(q) || (Array.isArray(q.circle) ? q.circle : wrongPositions(q));
+}
+// 已經確認過（這台電腦挑的，或題庫檔裡帶來的）
+const confirmed = q => Boolean(getPreset(q) || Array.isArray(q.circle));
 
 function savePreset() {
   try { localStorage.setItem(PRESET_KEY, JSON.stringify(S.preset)); } catch {}
@@ -171,19 +191,53 @@ function savePreset() {
 
 function renderPresetInfo() {
   const qs = correctionQs();
+  // 載入的題庫裡用到的設定，更新「最後用到的時間」
+  const now = Date.now();
+  for (const q of qs) if (S.preset[pkey(q)]) S.preset[pkey(q)].t = now;
+  if (qs.length) savePreset();
   $('#presetCard').classList.toggle('hidden', !qs.length);
-  const set = qs.filter(q => Array.isArray(S.preset[String(q.prompt ?? '')])).length;
-  $('#presetInfo').textContent = qs.length ? `題庫裡有 ${qs.length} 題改錯字，您已挑好 ${set} 題，其他 ${qs.length - set} 題由工具判斷。` : '';
+  const set = qs.filter(confirmed).length;
+  $('#presetInfo').textContent = qs.length ? `題庫裡有 ${qs.length} 題改錯字，已確認 ${set} 題，其他 ${qs.length - set} 題由工具判斷。` : '';
+  $('#presetDl').disabled = !set;
+}
+
+// 把確認過的錯字寫進題庫檔，另存一份下載到這台電腦（帶去別台電腦載入就能用）
+function downloadPresetBanks() {
+  for (const b of S.banks) {
+    if (!b.raw) continue;
+    const raw = JSON.parse(JSON.stringify(b.raw));
+    delete raw.errors;
+    const list = Array.isArray(raw) ? raw : raw.items || raw.questions || [];
+    const corr = new Map(b.items.flatMap(it => (it.type === 'group' ? it.subs : [it])).filter(q => q.type === 'correction').map(q => [pkey(q), q]));
+    let n = 0;
+    const mark = r => {
+      const q = corr.get(String(r.prompt ?? r.question ?? ''));
+      if (!q || !confirmed(q)) return;
+      const pos = circlePositions(q);
+      const chars = Array.from(pkey(q));
+      r.circle = pos;
+      r.wrong = pos.map(i => chars[i]).filter(Boolean);
+      n++;
+    };
+    for (const r of list) { if (Array.isArray(r.questions)) r.questions.forEach(mark); else mark(r); }
+    if (!n) continue;
+    const blob = new Blob([JSON.stringify(raw, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${String(b.fileTag || b.title).replace(/（已設定錯字）$/, '')}（已設定錯字）.json`;
+    document.body.append(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 5000);
+  }
 }
 
 function presetRowHtml(q, n) {
-  const key = String(q.prompt ?? '');
-  const mine = Array.isArray(S.preset[key]);
+  const mine = Boolean(getPreset(q));
   const pos = circlePositions(q);
-  const status = mine ? '<span class="preset-mine">✔ 您挑好的</span>' : pos.length ? '<span class="muted">工具判斷（還沒確認）</span>' : '<span class="muted">工具找不到錯字，請點字挑選</span>';
+  const status = mine ? '<span class="preset-mine">✔ 您挑好的</span>' : Array.isArray(q.circle) ? '<span class="preset-mine">✔ 已確認（題庫檔裡帶來的）</span>' : pos.length ? '<span class="muted">工具判斷（還沒確認）</span>' : '<span class="muted">工具找不到錯字，請點字挑選</span>';
   return `<div class="preset-item" data-n="${n}">
     <div class="preset-head"><b>第 ${n + 1} 題</b>　${status}　<span class="muted">答案：${esc(answerText(q))}</span>
-      <span class="preset-acts">${mine ? '' : '<button data-act="ok">✔ 沒問題，就這樣</button>'}${mine ? '<button data-act="auto">還原成工具判斷</button>' : ''}</span></div>
+      <span class="preset-acts">${confirmed(q) ? '' : '<button data-act="ok">✔ 沒問題，就這樣</button>'}${mine ? '<button data-act="auto">還原成工具判斷</button>' : ''}</span></div>
     <div class="q-prompt preset-prompt">${circledPromptHtml(q.prompt, pos)}</div></div>`;
 }
 
@@ -200,16 +254,15 @@ function openPreset() {
     const act = e.target.closest('[data-act]')?.dataset.act;
     const row = e.target.closest('.preset-item');
     const q = row ? qs[Number(row.dataset.n)] : null;
-    const key = q ? String(q.prompt ?? '') : '';
-    if (act === 'allok') { for (const x of qs) S.preset[String(x.prompt ?? '')] = circlePositions(x); redraw(); return; }
-    if (act === 'clear') { if (!confirm('確定要把全部挑好的錯字清掉，回到工具判斷嗎？')) return; for (const x of qs) delete S.preset[String(x.prompt ?? '')]; redraw(); return; }
-    if (act === 'ok' && q) { S.preset[key] = circlePositions(q); redraw(); return; }
-    if (act === 'auto' && q) { delete S.preset[key]; redraw(); return; }
+    if (act === 'allok') { for (const x of qs) setPreset(x, circlePositions(x)); redraw(); return; }
+    if (act === 'clear') { if (!confirm('確定要把這台電腦挑好的錯字全部清掉，回到工具判斷嗎？')) return; for (const x of qs) setPreset(x, null); redraw(); return; }
+    if (act === 'ok' && q) { setPreset(q, circlePositions(q)); redraw(); return; }
+    if (act === 'auto' && q) { setPreset(q, null); redraw(); return; }
     const ch = e.target.closest('.preset-prompt .ch[data-ci]');
     if (ch && q) {
       const i = Number(ch.dataset.ci);
       const list = circlePositions(q);
-      S.preset[key] = list.includes(i) ? list.filter(x => x !== i) : [...list, i].sort((a, b) => a - b);
+      setPreset(q, list.includes(i) ? list.filter(x => x !== i) : [...list, i].sort((a, b) => a - b));
       redraw();
     }
   });
@@ -1383,6 +1436,7 @@ function bind() {
   });
   $('#previewBtn').addEventListener('click', previewAll);
   $('#presetBtn').addEventListener('click', openPreset);
+  $('#presetDl').addEventListener('click', downloadPresetBanks);
   for (const r of $$('input[name=countMode]')) r.addEventListener('change', updateDrawInfo);
   $('#totalCount').addEventListener('input', updateDrawInfo);
   $('#typeRows').addEventListener('input', e => {
@@ -1548,6 +1602,7 @@ async function init() {
     note.classList.remove('hidden');
     note.textContent = '目前是單機測試模式：學生畫面只能在這台電腦的其他瀏覽器分頁打開。正式上課需要先完成 Firebase 設定。';
   }
+  S.preset = loadPreset();
   bind();
 }
 
