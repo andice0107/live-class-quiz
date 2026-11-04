@@ -67,6 +67,9 @@ function normQuestion(raw, id, errors, where) {
   const exp = raw.explanation ?? raw.詳解 ?? raw.解析 ?? raw.analysis;
   if (exp) q.explanation = String(exp);
   if (raw.cells) q.cells = Number(raw.cells);
+  // 改錯字：題目裡的錯字（依出現順序），讓老師一鍵圈出來
+  const wrong = raw.wrong ?? raw.錯字;
+  if (wrong) q.wrong = (Array.isArray(wrong) ? wrong.join('') : String(wrong)).match(/[\u3400-\u9fff\uf900-\ufaff]/g) || [];
   if (raw.time !== undefined && raw.time !== null && raw.time !== '') q.time = Number(raw.time);
   if (type === 'choice') {
     q.options = normOptions(raw.options);
@@ -122,7 +125,7 @@ export async function readBankFile(file) {
 export function publicQuestion(q) {
   // 格數要在拿掉答案前算好（例如寫國字依答案字數決定格數）
   if (TYPES[q.type].input === 'draw' && !q.cells && q.type !== 'word') q = { ...q, cells: defaultCells(q) };
-  const { answer, explanation, ...rest } = q;
+  const { answer, explanation, wrong, ...rest } = q;
   return rest;
 }
 
@@ -170,7 +173,28 @@ export function optionsHtml(q, { selected = null, correct = null, clickable = fa
   }).join('')}</div>`;
 }
 
-// 改錯字：題目一個字一個 span，老師圈起來的錯字加紅圈（circles 是字的位置）
+// 改錯字題目裡錯字的位置：依序在題目裡找題庫標好的錯字；
+// 沒有標的話，答案寫成「錯→正」（例如「門→們」）時用箭頭前面的字
+export function wrongPositions(q) {
+  if (q.type !== 'correction') return [];
+  let list = q.wrong && q.wrong.length ? q.wrong : null;
+  if (!list) {
+    const m = String(q.answer ?? '').split(/[、,，]/).map(s => s.split(/→|->|改成|＞|>/)).filter(p => p.length > 1);
+    list = m.map(p => (p[0].match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).pop()).filter(Boolean);
+  }
+  const chars = Array.from(String(q.prompt ?? ''));
+  const out = [];
+  let from = 0;
+  for (const w of list) {
+    const i = chars.indexOf(w, from);
+    if (i < 0) continue;
+    out.push(i);
+    from = i + 1;
+  }
+  return out;
+}
+
+// 改錯字：題目一個字一個 span，圈起來的錯字加紅圈（circles 是字的位置）
 export function circledPromptHtml(prompt, circles = []) {
   const on = new Set((circles || []).map(Number));
   return Array.from(String(prompt ?? '')).map((c, i) => (c === '\n' ? '<br>' : `<span class="ch${on.has(i) ? ' circled' : ''}" data-ci="${i}">${esc(c)}</span>`)).join('');

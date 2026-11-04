@@ -82,9 +82,9 @@ async function readParagraphs(file) {
   return { paras, skipped };
 }
 
-const FIELD = /^(題目|問題|答案|解答|詳解|解析|時間|秒數|格數|文章|短文|標題)\s*[:：]\s*/;
+const FIELD = /^(題目|問題|答案|解答|詳解|解析|時間|秒數|格數|文章|短文|標題|錯字)\s*[:：]\s*/;
 const OPTION = /^([A-HＡ-Ｈ])\s*[.．、)）]\s*/;
-const FIELD_KEY = { 題目: 'prompt', 問題: 'prompt', 答案: 'answer', 解答: 'answer', 詳解: 'explanation', 解析: 'explanation', 時間: 'time', 秒數: 'time', 格數: 'cells', 文章: 'passage', 短文: 'passage', 標題: 'title' };
+const FIELD_KEY = { 題目: 'prompt', 問題: 'prompt', 答案: 'answer', 解答: 'answer', 詳解: 'explanation', 解析: 'explanation', 時間: 'time', 秒數: 'time', 格數: 'cells', 文章: 'passage', 短文: 'passage', 標題: 'title', 錯字: 'wrong' };
 
 export async function readDocxBank(file) {
   const { paras, skipped } = await readParagraphs(file);

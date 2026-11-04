@@ -282,7 +282,5 @@ button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--
 .voice-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5em; }
 .voice-select { max-width: 22em; }
 
-/* 圈錯字模式：題目裡的字可以點 */
-.q-scroll.circling .q-prompt .ch, .circling .q-prompt .ch { cursor: pointer; border-radius: 50%; }
-.circling .q-prompt .ch:hover { background: rgba(224, 69, 58, .2); }
+/* 圈出錯字 */
 button.circle-on { background: #e0453a; color: #fff; border-color: #e0453a; }

@@ -1,6 +1,5 @@
 import { openDb } from './db.js';
-import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
-// 改錯字題的圈錯字：S.circles[qkey] = 被圈起來的字的位置
+import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter, wrongPositions } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
 import { renderSummary, computeScores, showQuestion, credit, fmtNum, partLabel } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
@@ -30,8 +29,7 @@ const S = {
   hintPrep: null,       // 準備部件提示中（Promise）
   hintUsed: {},         // qkey -> sid -> 第一次看提示的時間
   radicalOn: false,     // 這一題是否開放改錯字的部首意義提示
-  circles: {},          // qkey -> 老師在改錯字題目裡圈起來的字的位置
-  circleMode: false,    // 老師正在圈錯字（點題目裡的字就會圈起來）
+  circles: {},          // qkey -> 改錯字題目裡圈起來的錯字位置（老師按「圈出錯字」才有）
   scoreOpen: false,     // 即時成績面板是否展開
   // 文字縮放：q 題目、a 答案、s 學生作答（1 = 自動調到剛好放得下）
   fs: { q: 1, a: 1, s: 1, ...JSON.parse(localStorage.getItem(FS_KEY) || '{}') },
@@ -378,7 +376,6 @@ async function startStep(i) {
   // 每一題開始時，部件提示、部首意義先關閉，由老師決定要不要開
   S.hintOn = false;
   S.radicalOn = false;
-  S.circleMode = false;
   stopReading();
   // 每一題開始時，全班都可以作答
   S.pen = { all: true, by: {} };
@@ -575,7 +572,7 @@ function qPanelHtml(step) {
   if (it.type === 'group') {
     const tabs = [`<button data-sub="follow" class="${S.subTab === 'follow' ? 'on' : ''}">各自進度</button>`]
       .concat(step.keys.map((k, j) => `<button data-sub="${j}" class="${S.subTab === j ? 'on' : ''}">第 ${j + 1} 小題（${submittedCount(k)}/${n}）</button>`));
-    html += `<div class="q-scroll ${S.circleMode ? 'circling' : ''}">${passageHtml(it)}`;
+    html += `<div class="q-scroll">${passageHtml(it)}`;
     step.keys.forEach((k, j) => {
       const q = r.questions[k].q;
       html += `<div class="sub-q ${S.subTab === j ? 'focus' : ''}">${questionHtml(q, { label: r.questions[k].label, circles: circlesFor(k) })}
@@ -588,15 +585,18 @@ function qPanelHtml(step) {
     const k = step.keys[0];
     const q = it;
     const showAns = revealed || S.showAnswer;
-    html += `<div class="q-scroll ${S.circleMode ? 'circling' : ''}">${questionHtml(q, { label: `第 ${r.idx + 1} 題`, circles: circlesFor(k) })}
+    html += `<div class="q-scroll">${questionHtml(q, { label: `第 ${r.idx + 1} 題`, circles: circlesFor(k) })}
       ${q.type === 'choice' ? optionsHtml(q, { correct: showAns ? q.answer : null }) : ''}
       ${showAns && q.type !== 'choice' ? `<div class="${TYPES[q.type].input === 'draw' && [...answerText(q)].length <= 6 ? 'answer-big' : 'answer-mid'}">${textHtml(answerText(q))}</div>` : ''}
       ${showAns ? explainHtml(q) : ''}
       ${revealed ? '' : hintPreviewHtml(step) + radicalPreviewHtml(step)}
       </div><div class="q-foot"><span>已送出 ${submittedCount(k)} / ${n}</span></div>`;
   }
-  if (step.keys.some(k => S.round.questions[k].q.type === 'correction')) {
-    html += `<button id="circleBtn" class="peek ${S.circleMode ? 'circle-on' : ''}">${S.circleMode ? '⭕ 圈錯字中：點題目裡的字圈起來或取消（按這裡結束）' : '⭕ 圈出錯字'}</button>`;
+  const ck = step.keys.filter(k => S.round.questions[k].q.type === 'correction');
+  if (ck.length) {
+    const on = ck.some(k => (S.circles[k] || []).length);
+    const can = ck.some(k => wrongPositions(S.round.questions[k].q).length);
+    html += `<button id="circleBtn" class="peek ${on ? 'circle-on' : ''}" ${can ? '' : 'disabled title="題庫裡這一題沒有標出錯字"'}>${on ? '⭕ 錯字已圈出（點一下取消）' : can ? '⭕ 圈出錯字' : '⭕ 圈出錯字（題庫沒有標錯字）'}</button>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
   else {
@@ -1050,19 +1050,15 @@ function circlesFor(k) {
   return Q && Q.q.type === 'correction' ? (S.circles[k] || []) : null;
 }
 
-async function toggleCircle(el) {
-  const box = el.closest('.sub-q') || el.closest('.q-scroll');
+// 一鍵把這一題所有錯字圈起來（題庫標好的錯字），再按一次取消；學生畫面同步
+async function toggleCircles() {
   const step = current();
-  if (!step || !box) return;
-  const j = step.item.type === 'group' ? $$('.sub-q', $('#qPanel')).indexOf(box) : 0;
-  const k = step.keys[j];
-  if (!k || S.round.questions[k].q.type !== 'correction') return;
-  const i = Number(el.dataset.ci);
-  const list = S.circles[k] || [];
-  S.circles[k] = list.includes(i) ? list.filter(x => x !== i) : [...list, i].sort((a, b) => a - b);
+  if (!step) return;
+  const ks = step.keys.filter(k => S.round.questions[k].q.type === 'correction');
+  const on = !ks.some(k => (S.circles[k] || []).length);
+  for (const k of ks) S.circles[k] = on ? wrongPositions(S.round.questions[k].q) : [];
   renderQPanel();
-  // 學生畫面也跟著圈起來
-  await S.db.set(`rooms/${S.room}/current/circles/${k}`, S.circles[k].length ? S.circles[k] : null);
+  for (const k of ks) await S.db.set(`rooms/${S.room}/current/circles/${k}`, S.circles[k].length ? S.circles[k] : null);
 }
 
 // ---------- 讀題 ----------
@@ -1431,9 +1427,7 @@ function bind() {
     if (fs) { changeFont(fs.dataset.fs, Number(fs.dataset.d)); return; }
     const sp = e.target.closest('[data-speak]');
     if (sp) { readQuestion(sp.dataset.speak); return; }
-    if (e.target.id === 'circleBtn') { S.circleMode = !S.circleMode; $('#qPanel').lastHtml = ''; renderQPanel(); return; }
-    const ch = S.circleMode && e.target.closest('.ch[data-ci]');
-    if (ch) { toggleCircle(ch); return; }
+    if (e.target.id === 'circleBtn') { toggleCircles(); return; }
     if (e.target.id === 'peekBtn') { S.showAnswer = !S.showAnswer; renderQPanel(); return; }
     if (e.target.id === 'guideBtn') {
       S.guide = !S.guide;
