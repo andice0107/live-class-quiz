@@ -1,5 +1,5 @@
 import { openDb } from './db.js';
-import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter, wrongPositions } from './bank.js';
+import { TYPES, readBankFile, normalizeBank, publicItem, answerText, autoGrade, questionHtml, passageHtml, optionsHtml, letter, wrongPositions, circledPromptHtml } from './bank.js';
 import { $, $$, esc, textHtml, randomString, shuffle, sha256, fmtTime, showModal, enableImageZoom } from './util.js';
 import { renderSummary, computeScores, showQuestion, credit, fmtNum, partLabel } from './report.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
@@ -10,6 +10,7 @@ import { radicalOf } from './radicals.js';
 const USED_KEY = 'lcq-used';
 const FS_KEY = 'lcq-font-scale';
 const VOICE_KEY = 'lcq-voice';
+const PRESET_KEY = 'lcq-circle-preset';   // 老師預先挑好的改錯字錯字位置：題目文字 -> 位置
 
 const S = {
   db: null,
@@ -30,6 +31,7 @@ const S = {
   hintUsed: {},         // qkey -> sid -> 第一次看提示的時間
   radicalOn: false,     // 這一題是否開放改錯字的部首意義提示
   circles: {},          // qkey -> 改錯字題目裡圈起來的錯字位置（老師按「圈出錯字」才有）
+  preset: (() => { try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '{}'); } catch { return {}; } })(),
   scoreOpen: false,     // 即時成績面板是否展開
   // 文字縮放：q 題目、a 答案、s 學生作答（1 = 自動調到剛好放得下）
   fs: { q: 1, a: 1, s: 1, ...JSON.parse(localStorage.getItem(FS_KEY) || '{}') },
@@ -81,6 +83,7 @@ function renderBankInfo() {
   $('#bankErrors').classList.toggle('hidden', !errs.length);
   $('#bankErrors').innerHTML = errs.length ? `<b>有 ${errs.length} 個問題需要檢查：</b><br>${errs.map(esc).join('<br>')}` : '';
   $('#previewBtn').disabled = !S.items.length;
+  renderPresetInfo();
   renderTypeRows();
 }
 
@@ -147,6 +150,69 @@ function itemPreviewHtml(it, label) {
 function questionPreviewHtml(q, label) {
   return `${questionHtml(q, { label })}${q.type === 'choice' ? optionsHtml(q, { correct: q.answer }) : ''}
     <div class="preview-answer">答案：<b>${textHtml(answerText(q))}</b>${q.time ? `　<span class="muted">（${q.time} 秒）</span>` : ''}</div>`;
+}
+
+// ---------- 改錯字：預先挑錯字 ----------
+
+// 題庫裡所有改錯字題（含題組小題）
+function correctionQs() {
+  return S.items.flatMap(it => (it.type === 'group' ? it.subs : [it])).filter(q => q.type === 'correction');
+}
+
+// 要圈的位置：老師預先挑好的優先，沒有挑就用工具判斷（題庫標記）
+function circlePositions(q) {
+  const p = S.preset[String(q.prompt ?? '')];
+  return Array.isArray(p) ? p : wrongPositions(q);
+}
+
+function savePreset() {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(S.preset)); } catch {}
+}
+
+function renderPresetInfo() {
+  const qs = correctionQs();
+  $('#presetCard').classList.toggle('hidden', !qs.length);
+  const set = qs.filter(q => Array.isArray(S.preset[String(q.prompt ?? '')])).length;
+  $('#presetInfo').textContent = qs.length ? `題庫裡有 ${qs.length} 題改錯字，您已挑好 ${set} 題，其他 ${qs.length - set} 題由工具判斷。` : '';
+}
+
+function presetRowHtml(q, n) {
+  const key = String(q.prompt ?? '');
+  const mine = Array.isArray(S.preset[key]);
+  const pos = circlePositions(q);
+  const status = mine ? '<span class="preset-mine">✔ 您挑好的</span>' : pos.length ? '<span class="muted">工具判斷（還沒確認）</span>' : '<span class="muted">工具找不到錯字，請點字挑選</span>';
+  return `<div class="preset-item" data-n="${n}">
+    <div class="preset-head"><b>第 ${n + 1} 題</b>　${status}　<span class="muted">答案：${esc(answerText(q))}</span>
+      <span class="preset-acts">${mine ? '' : '<button data-act="ok">✔ 沒問題，就這樣</button>'}${mine ? '<button data-act="auto">還原成工具判斷</button>' : ''}</span></div>
+    <div class="q-prompt preset-prompt">${circledPromptHtml(q.prompt, pos)}</div></div>`;
+}
+
+function openPreset() {
+  const qs = correctionQs();
+  const body = () => qs.map((q, n) => presetRowHtml(q, n)).join('');
+  const m = showModal(`<h2>改錯字：預先挑出要圈的錯字</h2>
+    <p class="muted">點題目裡的字可以加圈或取消。紅圈就是上課按「⭕ 圈出錯字」時會圈起來的字。點過的題目會變成「您挑好的」；沒點過的題目上課時由工具判斷。</p>
+    <div class="row"><button data-act="allok">全部都沒問題（把工具判斷全部設成我挑好的）</button><button data-act="clear">全部清除，回到工具判斷</button></div>
+    <div class="preset-list">${body()}</div>`);
+  m.classList.add('preset-modal');
+  const redraw = () => { $('.preset-list', m).innerHTML = body(); savePreset(); renderPresetInfo(); };
+  m.addEventListener('click', e => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    const row = e.target.closest('.preset-item');
+    const q = row ? qs[Number(row.dataset.n)] : null;
+    const key = q ? String(q.prompt ?? '') : '';
+    if (act === 'allok') { for (const x of qs) S.preset[String(x.prompt ?? '')] = circlePositions(x); redraw(); return; }
+    if (act === 'clear') { if (!confirm('確定要把全部挑好的錯字清掉，回到工具判斷嗎？')) return; for (const x of qs) delete S.preset[String(x.prompt ?? '')]; redraw(); return; }
+    if (act === 'ok' && q) { S.preset[key] = circlePositions(q); redraw(); return; }
+    if (act === 'auto' && q) { delete S.preset[key]; redraw(); return; }
+    const ch = e.target.closest('.preset-prompt .ch[data-ci]');
+    if (ch && q) {
+      const i = Number(ch.dataset.ci);
+      const list = circlePositions(q);
+      S.preset[key] = list.includes(i) ? list.filter(x => x !== i) : [...list, i].sort((a, b) => a - b);
+      redraw();
+    }
+  });
 }
 
 // ---------- 抽題 ----------
@@ -595,7 +661,7 @@ function qPanelHtml(step) {
   const ck = step.keys.filter(k => S.round.questions[k].q.type === 'correction');
   if (ck.length) {
     const on = ck.some(k => (S.circles[k] || []).length);
-    const can = ck.some(k => wrongPositions(S.round.questions[k].q).length);
+    const can = ck.some(k => circlePositions(S.round.questions[k].q).length);
     html += `<button id="circleBtn" class="peek ${on ? 'circle-on' : ''}" ${can ? '' : 'disabled title="題庫裡這一題沒有標出錯字"'}>${on ? '⭕ 錯字已圈出（點一下取消）' : can ? '⭕ 圈出錯字' : '⭕ 圈出錯字（題庫沒有標錯字）'}</button>`;
   }
   if (!revealed) html += `<button id="peekBtn" class="peek">${S.showAnswer ? '隱藏答案' : '老師偷看答案'}</button>`;
@@ -1070,7 +1136,7 @@ async function toggleCircles() {
   if (!step) return;
   const ks = step.keys.filter(k => S.round.questions[k].q.type === 'correction');
   const on = !ks.some(k => (S.circles[k] || []).length);
-  for (const k of ks) S.circles[k] = on ? wrongPositions(S.round.questions[k].q) : [];
+  for (const k of ks) S.circles[k] = on ? circlePositions(S.round.questions[k].q) : [];
   renderQPanel();
   for (const k of ks) await S.db.set(`rooms/${S.room}/current/circles/${k}`, S.circles[k].length ? S.circles[k] : null);
 }
@@ -1316,6 +1382,7 @@ function bind() {
     renderBankInfo();
   });
   $('#previewBtn').addEventListener('click', previewAll);
+  $('#presetBtn').addEventListener('click', openPreset);
   for (const r of $$('input[name=countMode]')) r.addEventListener('change', updateDrawInfo);
   $('#totalCount').addEventListener('input', updateDrawInfo);
   $('#typeRows').addEventListener('input', e => {

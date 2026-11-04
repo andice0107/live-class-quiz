@@ -284,4 +284,11 @@ button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--
 
 /* 圈出錯字：圈出來以後可以點字微調 */
 .q-panel .q-prompt:has(.ch.circled) .ch { cursor: pointer; }
+.preset-item { border-top: 1px solid var(--line, #444); padding: .7em 0; }
+.preset-head { display: flex; flex-wrap: wrap; gap: .4em; align-items: center; }
+.preset-acts { margin-left: auto; display: flex; gap: .4em; }
+.preset-mine { color: #3fb950; font-weight: bold; }
+.preset-prompt { font-size: 1.6em; line-height: 1.9; margin-top: .3em; }
+.preset-prompt .ch { cursor: pointer; border-radius: 50%; }
+.preset-prompt .ch:hover { background: rgba(224, 69, 58, .2); }
 button.circle-on { background: #e0453a; color: #fff; border-color: #e0453a; }
