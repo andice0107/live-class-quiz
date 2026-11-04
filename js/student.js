@@ -1,5 +1,5 @@
 import { openDb } from './db.js';
-import { TYPES, questionHtml, passageHtml, optionsHtml, letter } from './bank.js';
+import { TYPES, questionHtml, passageHtml, optionsHtml, letter, circledPromptHtml } from './bank.js';
 import { $, esc, textHtml, sha256, fmtTime, throttle, ID_PATTERN, stripNonAlnum, enableImageZoom } from './util.js';
 import { buildCells, defaultCells, useGrid, paintInkThumb, cellData, guideChars, ensureKai } from './ink.js';
 import { applyTheme } from './theme.js';
@@ -94,7 +94,7 @@ function render(force = false) {
   const c = S.cur;
   const phase = c?.phase || 'waiting';
   const sig = `${phase}|${c?.round}|${(c?.keys || []).join(',')}|${phase === 'answering' ? S.sub : ''}|${phase === 'revealed' ? c.guide !== false : ''}`;
-  if (!force && sig === S.viewSig) { tick(); syncHints(); syncRadical(); return; }
+  if (!force && sig === S.viewSig) { tick(); syncHints(); syncRadical(); syncCircles(); return; }
   S.viewSig = sig;
   if (S.inkUnsub) { S.inkUnsub(); S.inkUnsub = null; }
   S.cells = null;
@@ -105,6 +105,25 @@ function render(force = false) {
   else renderMessage('等老師出題…');
   syncHints();
   syncRadical();
+  syncCircles();
+}
+
+// 老師在改錯字題目裡圈起來的錯字，學生畫面也加紅圈
+function syncCircles() {
+  const c = S.cur;
+  if (!c || !c.q || !c.keys) return;
+  const subs = c.q.type === 'group' ? c.q.subs : [c.q];
+  const blocks = c.phase === 'answering' ? [[curQ().q, curQ().key, $('.s-question .q-prompt')]]
+    : c.phase === 'revealed' ? [...app.querySelectorAll('.reveal-q .q-prompt')].map((el, j) => [subs[j], keys()[j], el]) : [];
+  for (const [q, key, el] of blocks) {
+    if (!q || !el || q.type !== 'correction') continue;
+    const raw = c.circles?.[key];
+    const list = raw ? (Array.isArray(raw) ? raw : Object.values(raw)) : [];
+    const sig = list.join(',');
+    if (el.dataset.circles === sig) continue;
+    el.dataset.circles = sig;
+    el.innerHTML = circledPromptHtml(q.prompt, list);
+  }
 }
 
 // ---------- 改錯字：部首意義提示 ----------

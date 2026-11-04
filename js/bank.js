@@ -170,11 +170,17 @@ export function optionsHtml(q, { selected = null, correct = null, clickable = fa
   }).join('')}</div>`;
 }
 
+// 改錯字：題目一個字一個 span，老師圈起來的錯字加紅圈（circles 是字的位置）
+export function circledPromptHtml(prompt, circles = []) {
+  const on = new Set((circles || []).map(Number));
+  return Array.from(String(prompt ?? '')).map((c, i) => (c === '\n' ? '<br>' : `<span class="ch${on.has(i) ? ' circled' : ''}" data-ci="${i}">${esc(c)}</span>`)).join('');
+}
+
 // 單題內容（題型標籤、題目、圖片）
-export function questionHtml(q, { label = '' } = {}) {
+export function questionHtml(q, { label = '', circles = null } = {}) {
   const t = TYPES[q.type];
   return `<div class="q-head"><span class="badge">${label ? esc(label) + '．' : ''}${t ? t.label : ''}</span></div>
-    <div class="q-prompt">${textHtml(q.prompt)}</div>${imagesHtml(q.images)}`;
+    <div class="q-prompt">${circles ? circledPromptHtml(q.prompt, circles) : textHtml(q.prompt)}</div>${imagesHtml(q.images)}`;
 }
 
 export function passageHtml(g) {

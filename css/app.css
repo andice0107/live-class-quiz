@@ -209,3 +209,6 @@ button.hint-card.off { opacity: .2; border-style: dashed; }
   font-size: 1.3rem; padding: .15em .9em; font-weight: 800;
   background: var(--warn); color: var(--warn-on-ink); border-color: var(--warn);
 }
+
+/* 改錯字：老師圈起來的錯字 */
+.q-prompt .ch.circled { border: 3px solid #e0453a; border-radius: 50%; padding: 0 .08em; margin: 0 -.03em; box-shadow: 0 0 0 1px rgba(224, 69, 58, .35); }
