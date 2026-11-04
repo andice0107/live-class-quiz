@@ -282,5 +282,6 @@ button.mask-open.active, button.mask-close.active { box-shadow: 0 0 0 3px var(--
 .voice-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5em; }
 .voice-select { max-width: 22em; }
 
-/* 圈出錯字 */
+/* 圈出錯字：圈出來以後可以點字微調 */
+.q-panel .q-prompt:has(.ch.circled) .ch { cursor: pointer; }
 button.circle-on { background: #e0453a; color: #fff; border-color: #e0453a; }

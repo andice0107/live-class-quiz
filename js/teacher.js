@@ -1050,6 +1050,20 @@ function circlesFor(k) {
   return Q && Q.q.type === 'correction' ? (S.circles[k] || []) : null;
 }
 
+async function adjustCircle(el) {
+  const step = current();
+  if (!step) return;
+  const box = el.closest('.sub-q');
+  const j = box ? $$('#qPanel .sub-q').indexOf(box) : 0;
+  const k = step.keys[j];
+  const list = (k && S.circles[k]) || [];
+  if (!list.length) return;
+  const i = Number(el.dataset.ci);
+  S.circles[k] = list.includes(i) ? list.filter(x => x !== i) : [...list, i].sort((x, y) => x - y);
+  renderQPanel();
+  await S.db.set(`rooms/${S.room}/current/circles/${k}`, S.circles[k].length ? S.circles[k] : null);
+}
+
 // 一鍵把這一題所有錯字圈起來（題庫標好的錯字），再按一次取消；學生畫面同步
 async function toggleCircles() {
   const step = current();
@@ -1428,6 +1442,9 @@ function bind() {
     const sp = e.target.closest('[data-speak]');
     if (sp) { readQuestion(sp.dataset.speak); return; }
     if (e.target.id === 'circleBtn') { toggleCircles(); return; }
+    // 圈出來以後，老師還可以點題目裡的字自己加圈或取消（萬一題庫標錯）
+    const ch = e.target.closest('.q-prompt .ch[data-ci]');
+    if (ch) { adjustCircle(ch); return; }
     if (e.target.id === 'peekBtn') { S.showAnswer = !S.showAnswer; renderQPanel(); return; }
     if (e.target.id === 'guideBtn') {
       S.guide = !S.guide;
